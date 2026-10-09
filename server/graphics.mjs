@@ -23,10 +23,19 @@ export const PALETTE = {
   inkLine: 'rgba(17,17,17,0.18)',
   lightPanel: '#FBF9F4',
 }
-export const TEMPLATES = ['title', 'card', 'notes', 'question', 'hero', 'device', 'presenter']
-/** Templates that show an uploaded image or clip in a media slot. */
+export const TEMPLATES = ['title', 'card', 'notes', 'question', 'hero', 'device', 'presenter', 'ticket']
+/** Templates that can show an uploaded image or clip in a media slot. */
 export const MEDIA_TEMPLATES = ['device', 'presenter']
-export const GRAPHIC_LIMITS = { headline: 90, support: 160, label: 24, items: 4, itemLabel: 20, itemText: 60, captions: 12, caption: 80 }
+/** Templates where the headline is optional (the picture or the interface carries the scene). */
+export const OPTIONAL_HEADLINE_TEMPLATES = ['device', 'presenter', 'ticket']
+export const EVENT_TYPES = ['request', 'note', 'action', 'shift']
+export const GRAPHIC_LIMITS = {
+  headline: 90, support: 160, label: 24, items: 4, itemLabel: 20, itemText: 60, captions: 12, caption: 80,
+  ticketTitle: 44, ticketMeta: 60, ticketTime: 12, ticketStatus: 16, ticketShift: 20, ticketApp: 24,
+  events: 6, eventText: 70, eventBy: 20, disclaimer: 48,
+}
+/** Every ticket scene carries this on screen unless the plan supplies other wording. It cannot be blank. */
+export const DEFAULT_DISCLAIMER = 'Illustration · not a real app'
 
 /** Words a viewer can comfortably read per second of screen time, plus a settle-in allowance. */
 export const READ_WORDS_PER_SECOND = 3
@@ -59,7 +68,7 @@ export function validateGraphic(raw, where = 'graphic') {
   const template = str(raw.template) || 'title'
   if (!TEMPLATES.includes(template)) throw new Error(`${where}.template must be one of ${TEMPLATES.join(', ')} (got "${raw.template}")`)
   const headline = str(raw.headline)
-  const needsHeadline = !MEDIA_TEMPLATES.includes(template)
+  const needsHeadline = !OPTIONAL_HEADLINE_TEMPLATES.includes(template)
   if (needsHeadline && !headline) throw new Error(`${where}.headline is required`)
   if (headline.length > GRAPHIC_LIMITS.headline) throw new Error(`${where}.headline must be ${GRAPHIC_LIMITS.headline} characters or fewer (got ${headline.length})`)
   const support = str(raw.support)
@@ -93,11 +102,16 @@ export function validateGraphic(raw, where = 'graphic') {
   if (theme !== 'dark' && theme !== 'light') throw new Error(`${where}.theme must be "dark" or "light"`)
   const accent = str(raw.accent)
 
-  // Media slot: 'asset' consumes the next uploaded file, 'placeholder' draws a labelled empty slot.
+  // Media slot. 'asset' consumes the next uploaded file. A presenter scene defaults to 'none': it then
+  // runs faceless, with its captions as large type, so missing footage never blocks a render and no
+  // placeholder is ever drawn into an export. A device card has nothing to show without a file.
   let media = 'none'
-  if (MEDIA_TEMPLATES.includes(template)) {
+  if (template === 'presenter') {
+    media = raw.media === undefined ? 'none' : raw.media
+    if (media !== 'asset' && media !== 'none') throw new Error(`${where}.media must be "asset" or "none"`)
+  } else if (template === 'device') {
     media = raw.media === undefined ? 'asset' : raw.media
-    if (media !== 'asset' && media !== 'placeholder') throw new Error(`${where}.media must be "asset" or "placeholder"`)
+    if (media !== 'asset') throw new Error(`${where}.media must be "asset": a device card needs an uploaded screenshot or recording`)
   }
   const frame = raw.frame === undefined ? 'auto' : raw.frame
   if (!['auto', 'phone', 'desktop'].includes(frame)) throw new Error(`${where}.frame must be auto, phone or desktop`)
@@ -138,11 +152,63 @@ export function validateGraphic(raw, where = 'graphic') {
     })
   }
 
-  return { template, theme, headline, support, label, accent, items, emphasize, gather, media, frame, focus, zoom, beat, land, captions }
+  // Ticket: an original, clearly fictional maintenance-request interface, driven by timed events.
+  let ticket = null
+  let events = []
+  let disclaimer = ''
+  if (template === 'ticket') {
+    const tk = raw.ticket
+    if (!tk || typeof tk !== 'object' || Array.isArray(tk)) throw new Error(`${where}.ticket must be an object with at least a title`)
+    const field = (key, limit, fallback = '') => {
+      const v = str(tk[key]) || fallback
+      if (v.length > limit) throw new Error(`${where}.ticket.${key} must be ${limit} characters or fewer`)
+      return v
+    }
+    ticket = {
+      title: field('title', GRAPHIC_LIMITS.ticketTitle),
+      meta: field('meta', GRAPHIC_LIMITS.ticketMeta),
+      time: field('time', GRAPHIC_LIMITS.ticketTime),
+      status: field('status', GRAPHIC_LIMITS.ticketStatus, 'Open'),
+      shift: field('shift', GRAPHIC_LIMITS.ticketShift, 'Day shift'),
+      app: field('app', GRAPHIC_LIMITS.ticketApp, 'Requests'),
+    }
+    if (!ticket.title) throw new Error(`${where}.ticket.title is required`)
+    if (raw.events !== undefined && raw.events !== null) {
+      if (!Array.isArray(raw.events)) throw new Error(`${where}.events must be an array`)
+      if (raw.events.length > GRAPHIC_LIMITS.events) throw new Error(`${where}.events can hold at most ${GRAPHIC_LIMITS.events} events`)
+      events = raw.events.map((ev, i) => {
+        if (!ev || typeof ev !== 'object') throw new Error(`${where}.events[${i}] must be an object with a type`)
+        if (!EVENT_TYPES.includes(ev.type)) throw new Error(`${where}.events[${i}].type must be one of ${EVENT_TYPES.join(', ')} (got "${ev.type}")`)
+        // `at` is seconds into the scene. Omitted (or null) means the event already happened before
+        // the scene starts, so a later scene can carry the ticket on from an earlier one.
+        let at = null
+        if (ev.at !== undefined && ev.at !== null) {
+          at = num(ev.at)
+          if (at === null || at < 0) throw new Error(`${where}.events[${i}].at must be a time in seconds, or omitted for "already happened"`)
+        }
+        const text = str(ev.text)
+        const by = str(ev.by)
+        const time = str(ev.time)
+        if (text.length > GRAPHIC_LIMITS.eventText) throw new Error(`${where}.events[${i}].text must be ${GRAPHIC_LIMITS.eventText} characters or fewer`)
+        if (by.length > GRAPHIC_LIMITS.eventBy) throw new Error(`${where}.events[${i}].by must be ${GRAPHIC_LIMITS.eventBy} characters or fewer`)
+        if (time.length > GRAPHIC_LIMITS.ticketTime) throw new Error(`${where}.events[${i}].time must be ${GRAPHIC_LIMITS.ticketTime} characters or fewer`)
+        if ((ev.type === 'note' || ev.type === 'action' || ev.type === 'shift') && !text) throw new Error(`${where}.events[${i}].text is required for a ${ev.type} event`)
+        return { type: ev.type, at, text, by, time }
+      })
+    }
+    disclaimer = raw.disclaimer === undefined || raw.disclaimer === null ? DEFAULT_DISCLAIMER : str(raw.disclaimer)
+    if (!disclaimer) throw new Error(`${where}.disclaimer cannot be blank: a fictional interface must say so on screen`)
+    if (disclaimer.length > GRAPHIC_LIMITS.disclaimer) throw new Error(`${where}.disclaimer must be ${GRAPHIC_LIMITS.disclaimer} characters or fewer`)
+  }
+  // `continues`: this scene carries on the previous scene's picture. The previous graphic then does not
+  // fade out at the cut, and this one skips its entrance.
+  const continues = raw.continues === true
+
+  return { template, theme, headline, support, label, accent, items, emphasize, gather, media, frame, focus, zoom, beat, land, captions, ticket, events, disclaimer, continues }
 }
 
 export function graphicWordCount(spec) {
-  const text = [spec.headline, spec.support, spec.label, ...spec.items.flatMap((i) => [i.label, i.text])].join(' ')
+  const text = [spec.headline, spec.support, spec.label, spec.ticket?.title ?? '', ...spec.items.flatMap((i) => [i.label, i.text])].join(' ')
   return text.split(/\s+/).filter(Boolean).length
 }
 
@@ -304,12 +370,20 @@ function drawLitLines(ctx, lines, x, y, opts, lit, base = PALETTE.cream) {
 
 // ---------- backgrounds ----------
 
-/** Theme background: plain black, or cream with a faint dot grid and one orange form off a corner. */
-function drawBackground(ctx, theme, t, seconds) {
+/**
+ * Theme background: plain black, or cream with a faint dot grid and one orange form off a corner.
+ * `night` (0..1) darkens a light background to black: the ticket's shift change turns the lights out.
+ */
+function drawBackground(ctx, theme, t, seconds, night = 0) {
   const c = colors(theme)
   ctx.fillStyle = c.bg
   ctx.fillRect(0, 0, WIDTH, HEIGHT)
   if (theme !== 'light') return
+  if (night >= 1) {
+    ctx.fillStyle = PALETTE.black
+    ctx.fillRect(0, 0, WIDTH, HEIGHT)
+    return
+  }
   ctx.save()
   ctx.fillStyle = 'rgba(17,17,17,0.11)'
   for (let y = 24; y < HEIGHT; y += 36) for (let x = 24; x < WIDTH; x += 36) ctx.fillRect(x, y, 3, 3)
@@ -322,16 +396,25 @@ function drawBackground(ctx, theme, t, seconds) {
   ctx.beginPath()
   ctx.arc(-90 + drift * 14, HEIGHT - 20, 170, 0, Math.PI * 2)
   ctx.fill()
+  if (night > 0) {
+    ctx.globalAlpha = night
+    ctx.fillStyle = PALETTE.black
+    ctx.fillRect(0, 0, WIDTH, HEIGHT)
+  }
   ctx.restore()
 }
 
 // ---------- captions ----------
 
-/** Timed caption cues at the bottom of the frame. One highlighted word reads in orange. */
-function drawCaptions(ctx, spec, t) {
-  const c = colors(spec.theme)
+/**
+ * Timed caption cues at the bottom of the frame. One highlighted word reads in orange. `theme` is the
+ * scene theme or a function of the cue, so a cue keeps one style even if the scene darkens under it.
+ */
+function drawCaptions(ctx, spec, t, theme = spec.theme) {
   for (const cue of spec.captions) {
     if (t < cue.start || t >= cue.end) continue
+    const cueTheme = typeof theme === 'function' ? theme(cue) : theme
+    const c = colors(cueTheme)
     const pop = easeOut(clamp01((t - cue.start) / 0.16))
     const fit = fitText(ctx, cue.text, { weight: 700, sizes: [44, 40, 36, 32], maxWidth: CONTENT_W - 20, maxLines: 2, lineHeight: 1.15 })
     const h = fit.lines.length * fit.lineHeight
@@ -341,7 +424,7 @@ function drawCaptions(ctx, spec, t) {
     ctx.translate(WIDTH / 2, y + h / 2)
     ctx.scale(lerp(0.92, 1, pop), lerp(0.92, 1, pop))
     ctx.translate(-WIDTH / 2, -(y + h / 2))
-    if (spec.theme === 'light') {
+    if (cueTheme === 'light') {
       ctx.fillStyle = 'rgba(251,249,244,0.92)'
       const w = Math.max(...fit.lines.map((l) => ctx.measureText(l).width)) + 44
       roundRect(ctx, WIDTH / 2 - w / 2, y - 12, w, h + 20, 14)
@@ -685,24 +768,6 @@ function sourceRect(spec, media, t) {
   return { sx: lerp(full.sx, tx, p), sy: lerp(full.sy, ty, p), sw: lerp(full.sw, tw, p), sh: lerp(full.sh, th, p) }
 }
 
-function drawPlaceholder(ctx, x, y, w, h, r, title, lines, theme) {
-  const c = colors(theme)
-  ctx.save()
-  ctx.fillStyle = theme === 'light' ? 'rgba(17,17,17,0.06)' : 'rgba(242,238,229,0.06)'
-  roundRect(ctx, x, y, w, h, r)
-  ctx.fill()
-  ctx.setLineDash([14, 12])
-  ctx.strokeStyle = c.dim
-  ctx.lineWidth = 2
-  roundRect(ctx, x + 1, y + 1, w - 2, h - 2, r)
-  ctx.stroke()
-  ctx.setLineDash([])
-  drawLabel(ctx, title, x + 28, y + 26, { color: PALETTE.orange, size: 20 })
-  const body = layoutBody(ctx, lines, [26, 23, 20], 6, w - 56)
-  drawLines(ctx, body.lines, x + 28, y + 72, { size: body.size, weight: 500, lineHeight: body.lineHeight, color: c.dim })
-  ctx.restore()
-}
-
 function drawDevice(ctx, spec, t, seconds, media) {
   const c = colors(spec.theme)
   const card = deviceCard(spec.frame, media ? media.w / media.h : null)
@@ -723,15 +788,7 @@ function drawDevice(ctx, spec, t, seconds, media) {
   ctx.rotate(tilt)
   ctx.scale(grow, grow)
   ctx.translate(-card.w / 2, -card.h / 2)
-  // Shadowed bezel, then the media clipped inside it.
-  ctx.save()
-  ctx.shadowColor = spec.theme === 'light' ? 'rgba(0,0,0,0.30)' : 'rgba(0,0,0,0.7)'
-  ctx.shadowBlur = 60
-  ctx.shadowOffsetY = 28
-  ctx.fillStyle = '#050505'
-  roundRect(ctx, 0, 0, card.w, card.h, card.r)
-  ctx.fill()
-  ctx.restore()
+  drawBezel(ctx, card, spec.theme)
   const bezel = card.kind === 'phone' ? 10 : 8
   ctx.save()
   roundRect(ctx, bezel, bezel, card.w - bezel * 2, card.h - bezel * 2, card.r - bezel)
@@ -740,24 +797,44 @@ function drawDevice(ctx, spec, t, seconds, media) {
     const s = sourceRect(spec, media, t)
     ctx.drawImage(media.image, s.sx, s.sy, s.sw, s.sh, bezel, bezel, card.w - bezel * 2, card.h - bezel * 2)
   } else {
+    // Validation requires a file for a device card; a frame drawn without one stays a dark screen.
     ctx.fillStyle = PALETTE.panel
     ctx.fillRect(0, 0, card.w, card.h)
-    drawPlaceholder(ctx, bezel + 16, bezel + 16, card.w - bezel * 2 - 32, card.h - bezel * 2 - 32, 20, 'Screenshot', 'No screenshot or recording assigned to this scene yet.', 'dark')
   }
   ctx.restore()
-  ctx.strokeStyle = 'rgba(242,238,229,0.22)'
-  ctx.lineWidth = 1.5
-  roundRect(ctx, 0.75, 0.75, card.w - 1.5, card.h - 1.5, card.r)
-  ctx.stroke()
+  drawBezelEdge(ctx, card)
   ctx.restore()
 
   drawCaptions(ctx, spec, t)
 }
 
+/** Shadowed black device body. Drawn in card-local coordinates. */
+function drawBezel(ctx, card, theme) {
+  ctx.save()
+  ctx.shadowColor = theme === 'light' ? 'rgba(0,0,0,0.30)' : 'rgba(0,0,0,0.7)'
+  ctx.shadowBlur = 60
+  ctx.shadowOffsetY = 28
+  ctx.fillStyle = '#050505'
+  roundRect(ctx, 0, 0, card.w, card.h, card.r)
+  ctx.fill()
+  ctx.restore()
+}
+function drawBezelEdge(ctx, card) {
+  ctx.strokeStyle = 'rgba(242,238,229,0.22)'
+  ctx.lineWidth = 1.5
+  roundRect(ctx, 0.75, 0.75, card.w - 1.5, card.h - 1.5, card.r)
+  ctx.stroke()
+}
+
+/**
+ * Presenter. With a clip: the owner to camera, full frame, with a slow push and bottom captions.
+ * Without one (the default, faceless production): the same captions become large type in the middle
+ * of the frame, each cue punching in as it is spoken. Nothing stands in for a person.
+ */
 function drawPresenter(ctx, spec, t, seconds, media) {
   const c = colors(spec.theme)
-  if (media?.image) {
-    // Slow push-in keeps a locked-off clip alive; the bottom vignette keeps captions readable.
+  const hasClip = Boolean(media?.image)
+  if (hasClip) {
     const push = lerp(1.0, 1.08, easeInOut(clamp01(t / Math.max(seconds, 0.1))))
     const s = sourceRect(spec, media, t)
     ctx.save()
@@ -771,51 +848,499 @@ function drawPresenter(ctx, spec, t, seconds, media) {
     grad.addColorStop(1, 'rgba(0,0,0,0.72)')
     ctx.fillStyle = grad
     ctx.fillRect(0, HEIGHT - 420, WIDTH, 420)
-  } else {
-    drawPlaceholder(
-      ctx,
-      SAFE_X - 24,
-      SAFE_TOP - 40,
-      WIDTH - (SAFE_X - 24) * 2,
-      SAFE_BOTTOM - SAFE_TOP - 120,
-      28,
-      'Presenter clip · not supplied',
-      'This slot plays your own recording of you speaking to camera. Record 10–15 s, phone upright (9:16), eye level, plain background, saying the lines for this scene. No stand-in image is used.',
-      spec.theme,
-    )
   }
-  if (spec.label) withRise(ctx, enter(t, 0.1), () => drawLabel(ctx, spec.label, SAFE_X, SAFE_TOP - 100, { color: PALETTE.orange }))
+  const labelY = hasClip ? SAFE_TOP - 100 : SAFE_TOP - 20
+  if (spec.label) withRise(ctx, enter(t, 0.1), () => drawLabel(ctx, spec.label, SAFE_X, labelY, { color: PALETTE.orange }))
   if (spec.headline) {
     const head = layoutHeadline(ctx, spec.headline, [56, 48, 42], 2)
-    withRise(ctx, enter(t, 0.2), () => drawAccentLines(ctx, head.lines, SAFE_X, SAFE_TOP - 60, { size: head.size, weight: 700, color: media?.image ? PALETTE.cream : c.text, accentColor: PALETTE.orange, accent: spec.accent, lineHeight: head.lineHeight }))
+    withRise(ctx, enter(t, 0.2), () => drawAccentLines(ctx, head.lines, SAFE_X, labelY + 40, { size: head.size, weight: 700, color: hasClip ? PALETTE.cream : c.text, accentColor: PALETTE.orange, accent: spec.accent, lineHeight: head.lineHeight }))
   }
-  drawCaptions(ctx, spec, t)
+  if (hasClip) drawCaptions(ctx, spec, t)
+  else drawSpokenType(ctx, spec, t)
 }
 
-const DRAW = { title: drawTitle, card: drawCard, notes: drawNotes, question: drawQuestion, hero: drawHero, device: drawDevice, presenter: drawPresenter }
+/** The faceless presenter: each caption cue as oversized centred type, held until the next cue. */
+function drawSpokenType(ctx, spec, t) {
+  const c = colors(spec.theme)
+  const cues = spec.captions
+  let current = -1
+  for (let i = 0; i < cues.length; i++) if (t >= cues[i].start) current = i
+  if (current < 0) return
+  const cue = cues[current]
+  const next = cues[current + 1]
+  if (t >= cue.end && (!next || t >= next.start) && next) return
+  const fit = fitText(ctx, cue.text, { weight: 700, sizes: [96, 84, 74, 64, 56, 48], maxWidth: CONTENT_W, maxLines: 4, lineHeight: 1.02 })
+  const h = fit.lines.length * fit.lineHeight
+  const top = Math.max(SAFE_TOP + 80, (SAFE_TOP + 80 + SAFE_BOTTOM) / 2 - h / 2)
+  const land = punch(t, cue.start, 0.3, 1.3)
+  ctx.save()
+  ctx.globalAlpha *= land.alpha
+  ctx.translate(SAFE_X, top + h / 2)
+  ctx.scale(land.scale, land.scale)
+  ctx.translate(-SAFE_X, -(top + h / 2))
+  drawAccentLines(ctx, fit.lines, SAFE_X, top, { size: fit.size, weight: 700, color: c.text, accentColor: PALETTE.orange, accent: cue.highlight, lineHeight: fit.lineHeight })
+  ctx.restore()
+}
 
-/** Draw one frame of a graphic scene at time t (seconds) into ctx. `media` is the slot's current frame. */
-export function drawGraphicFrame(ctx, spec, t, seconds, media = null) {
+// ---------- template: ticket (an original, fictional request interface driven by events) ----------
+
+/**
+ * MOCK INTERFACE. Everything drawn here is fictional and drawn by this renderer: no real product,
+ * customer or request. Every frame carries `spec.disclaimer` so the export says so too.
+ */
+const TICKET_CARD = { kind: 'phone', w: 400, h: 800, x: (WIDTH - 400) / 2, y: 170, r: 36 }
+const TICKET_BEZEL = 10
+const UI = { bg: '#121212', surface: '#1E1E1E', line: 'rgba(242,238,229,0.14)', text: PALETTE.cream, dim: 'rgba(242,238,229,0.55)' }
+const EVENT_DUR = { request: 0.5, note: 0.45, action: 0.45, shift: 0.45 }
+
+/** Events in order, with an implicit request at the start if the plan did not include one. */
+function ticketEvents(spec) {
+  const list = [...spec.events]
+  if (!list.some((e) => e.type === 'request')) list.unshift({ type: 'request', at: null, text: '', by: '', time: spec.ticket.time })
+  const key = (e) => (e.at === null ? -1 : e.at)
+  return list.map((e, i) => ({ ...e, i })).sort((a, b) => key(a) - key(b) || a.i - b.i)
+}
+/** 0..1 progress of an event at time t; 1 for events that already happened. */
+const eventProgress = (ev, t, dur = EVENT_DUR[ev.type]) => (ev.at === null ? 1 : easeOut(clamp01((t - ev.at) / dur)))
+const eventStarted = (ev, t) => ev.at === null || t >= ev.at
+
+function initials(name) {
+  const parts = name.split(/\s+/).filter(Boolean)
+  return parts.slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '·'
+}
+
+/** Reveal the first n characters of wrapped lines (typing). */
+function revealLines(lines, n) {
+  const out = []
+  let left = n
+  for (const line of lines) {
+    if (left <= 0) break
+    out.push(line.slice(0, left))
+    left -= line.length + 1
+  }
+  return out
+}
+
+function chip(ctx, text, x, y, { fill, stroke, color, size = 13, padX = 12, h = 30, alpha = 1, align = 'left' }) {
+  ctx.save()
+  ctx.globalAlpha *= alpha
+  ctx.font = `700 ${size}px "${FAMILY}"`
+  const letters = text.toUpperCase()
+  let w = 0
+  for (const ch of letters) w += ctx.measureText(ch).width + size * 0.1
+  w += padX * 2 - size * 0.1
+  const left = align === 'right' ? x - w : x
+  roundRect(ctx, left, y, w, h, h / 2)
+  if (fill) {
+    ctx.fillStyle = fill
+    ctx.fill()
+  }
+  if (stroke) {
+    ctx.strokeStyle = stroke
+    ctx.lineWidth = 1.5
+    ctx.stroke()
+  }
+  ctx.fillStyle = color
+  ctx.textBaseline = 'middle'
+  let cx = left + padX
+  for (const ch of letters) {
+    ctx.fillText(ch, cx, y + h / 2 + 1)
+    cx += ctx.measureText(ch).width + size * 0.1
+  }
+  ctx.restore()
+  return { w, h }
+}
+
+function checkCircle(ctx, cx, cy, r, ring, tick, color) {
+  ctx.save()
+  ctx.strokeStyle = color
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.lineWidth = 2.5
+  if (ring > 0) {
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ring)
+    ctx.stroke()
+  }
+  if (tick > 0) {
+    // A two-segment tick drawn progressively.
+    const a = { x: cx - r * 0.45, y: cy + r * 0.02 }
+    const b = { x: cx - r * 0.1, y: cy + r * 0.38 }
+    const d = { x: cx + r * 0.5, y: cy - r * 0.32 }
+    ctx.beginPath()
+    ctx.moveTo(a.x, a.y)
+    if (tick < 0.4) ctx.lineTo(lerp(a.x, b.x, tick / 0.4), lerp(a.y, b.y, tick / 0.4))
+    else {
+      ctx.lineTo(b.x, b.y)
+      const q = (tick - 0.4) / 0.6
+      ctx.lineTo(lerp(b.x, d.x, q), lerp(b.y, d.y, q))
+    }
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+function clockIcon(ctx, cx, cy, r, color) {
+  ctx.save()
+  ctx.strokeStyle = color
+  ctx.lineCap = 'round'
+  ctx.lineWidth = 2.2
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(cx, cy - r * 0.55)
+  ctx.lineTo(cx, cy)
+  ctx.lineTo(cx + r * 0.45, cy + r * 0.25)
+  ctx.stroke()
+  ctx.restore()
+}
+
+/** Lay out the activity rows for the events that have started by t. Card-local coordinates. */
+function layoutTicketRows(ctx, spec, events, t, top, width) {
+  const rows = []
+  let y = top
+  for (const ev of events) {
+    if (!eventStarted(ev, t)) continue
+    let text
+    let meta
+    if (ev.type === 'request') {
+      text = 'Request opened'
+      meta = ['Resident', ev.time || spec.ticket.time].filter(Boolean).join(' · ')
+    } else if (ev.type === 'shift') {
+      text = 'Shift change'
+      meta = [`${prevShift(spec, events, ev)} → ${ev.text}`, ev.time].filter(Boolean).join(' · ')
+    } else {
+      text = ev.text
+      meta = [ev.by, ev.time].filter(Boolean).join(' · ')
+    }
+    const body = layoutBody(ctx, text, [21, 19], 2, width - 60)
+    const h = body.lines.length * body.lineHeight + (meta ? 24 : 6) + 14
+    rows.push({ ev, text, meta, body, y, h })
+    y += h
+  }
+  return rows
+}
+
+function prevShift(spec, events, ev) {
+  let name = spec.ticket.shift
+  for (const e of events) {
+    if (e === ev) break
+    if (e.type === 'shift') name = e.text
+  }
+  return name
+}
+
+/** The camera inside the card: pushes toward a new note or action, pulls back out on a shift change. */
+function ticketCamera(events, rows, t, iw, ih) {
+  const centre = { z: 1, fx: iw / 2, fy: ih / 2 }
+  const keys = []
+  for (const ev of events) {
+    if (!eventStarted(ev, t) && ev.at !== null) continue
+    const row = rows.find((r) => r.ev === ev)
+    if ((ev.type === 'note' || ev.type === 'action') && row) keys.push({ time: ev.at === null ? -Infinity : ev.at + 0.15, z: 1.12, fx: iw / 2, fy: row.y + row.h / 2 + 40 })
+    else if (ev.type === 'shift') keys.push({ time: ev.at === null ? -Infinity : ev.at + 0.1, ...centre })
+  }
+  let from = centre
+  let state = centre
+  let lastTime = -Infinity
+  for (const k of keys) {
+    const p = k.time === -Infinity ? 1 : easeInOut(clamp01((k.time - lastTime) / 0.9))
+    from = { z: lerp(from.z, state.z, p), fx: lerp(from.fx, state.fx, p), fy: lerp(from.fy, state.fy, p) }
+    state = k
+    lastTime = k.time
+  }
+  const p = lastTime === -Infinity ? 1 : easeInOut(clamp01((t - lastTime) / 0.9))
+  return { z: lerp(from.z, state.z, p), fx: lerp(from.fx, state.fx, p), fy: lerp(from.fy, state.fy, p) }
+}
+
+function drawTicket(ctx, spec, t, seconds) {
+  const c = colors(spec.theme)
+  const card = TICKET_CARD
+  const tk = spec.ticket
+  const events = ticketEvents(spec)
+  const request = events.find((e) => e.type === 'request')
+  const shift = events.find((e) => e.type === 'shift' && eventStarted(e, t))
+  const shiftP = shift ? eventProgress(shift, t) : 0
+  // Lights out: a light scene goes black as the shift changes, and the open request stays lit.
+  const night = spec.theme === 'light' && shift ? (shift.at === null ? 1 : easeInOut(clamp01((t - shift.at - 0.25) / 0.6))) : 0
+  // The background is drawn by drawGraphicFrame without the night overlay; redraw it here with it.
+  drawBackground(ctx, spec.theme, t, seconds, night)
+
+  const p = spec.continues ? 1 : enter(t, 0, 0.5)
+  // The chapter label above the card rolls over to the new shift's name with the shift change.
+  const roll = shift ? (shift.at === null ? 1 : easeInOut(clamp01((t - shift.at) / 0.4))) : 0
+  if (spec.label) {
+    withRise(ctx, spec.continues ? 1 : enter(t, 0.05), () => {
+      if (roll < 1) drawLabel(ctx, spec.label, SAFE_X, card.y - 62 - roll * 22, { color: PALETTE.orange, alpha: p * (1 - roll) })
+      if (roll > 0) drawLabel(ctx, shift.text, SAFE_X, card.y - 62 + (1 - roll) * 22, { color: PALETTE.orange, alpha: p * roll })
+    })
+  }
+  if (spec.headline) {
+    const head = layoutHeadline(ctx, spec.headline, [44, 38, 32], 2)
+    withRise(ctx, spec.continues ? 1 : enter(t, 0.15), () => drawAccentLines(ctx, head.lines, SAFE_X, card.y - 62 - head.lines.length * head.lineHeight - 8, { size: head.size, weight: 700, color: night > 0.5 ? PALETTE.cream : c.text, accentColor: PALETTE.orange, accent: spec.accent, lineHeight: head.lineHeight }))
+  }
+
+  ctx.save()
+  ctx.globalAlpha *= p
+  ctx.translate(card.x, card.y + (1 - p) * 40)
+  drawBezel(ctx, card, night > 0.5 ? 'dark' : spec.theme)
+  const b = TICKET_BEZEL
+  const iw = card.w - b * 2
+  const ih = card.h - b * 2
+  ctx.save()
+  roundRect(ctx, b, b, iw, ih, card.r - b)
+  ctx.clip()
+  ctx.translate(b, b)
+  ctx.fillStyle = UI.bg
+  ctx.fillRect(0, 0, iw, ih)
+
+  // ----- layout (interior coordinates) -----
+  const pad = 30
+  const contentW = iw - pad * 2
+  const reqP = request ? eventProgress(request, t) : 0
+  const reqStarted = request ? eventStarted(request, t) : false
+  const headerH = 128
+  const title = layoutHeadline(ctx, tk.title, [31, 28, 25], 2, contentW, 1.12)
+  const blockH = 30 + 12 + title.lines.length * title.lineHeight + (tk.meta ? 30 : 8) + 44 + 18
+  const feedTop = headerH + blockH + 26
+  const rows = layoutTicketRows(ctx, spec, events, t, feedTop + 34, contentW)
+  const cam = ticketCamera(events, rows, t, iw, ih)
+
+  ctx.save()
+  ctx.translate(cam.fx, cam.fy)
+  ctx.scale(cam.z, cam.z)
+  ctx.translate(-cam.fx, -cam.fy)
+  ctx.fillStyle = UI.bg
+  ctx.fillRect(-iw, -ih, iw * 3, ih * 3)
+
+  // Status strip: the time of the latest thing that happened.
+  const latest = [...events].reverse().find((e) => eventStarted(e, t) && e.time)
+  ctx.font = `500 15px "${FAMILY}"`
+  ctx.fillStyle = UI.dim
+  ctx.textBaseline = 'alphabetic'
+  ctx.fillText(latest?.time || tk.time || '', pad, 34)
+  ctx.fillStyle = UI.dim
+  roundRect(ctx, iw - pad - 26, 22, 26, 12, 4)
+  ctx.fill()
+
+  // Header: app name and the shift chip, which rolls over on a shift change.
+  ctx.font = `700 28px "${FAMILY}"`
+  ctx.fillStyle = UI.text
+  ctx.fillText(tk.app, pad, 86)
+  ctx.font = `500 16px "${FAMILY}"`
+  ctx.fillStyle = UI.dim
+  ctx.fillText('Maintenance', pad, 112)
+  const chipY = 60
+  const chipH = 30
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(iw / 2, chipY - 6, iw / 2, chipH + 12)
+  ctx.clip()
+  const oldShift = shift ? prevShift(spec, events, shift) : tk.shift
+  if (roll < 1) chip(ctx, oldShift, iw - pad, chipY - roll * (chipH + 10), { fill: PALETTE.orange, color: PALETTE.black, alpha: 1 - roll, align: 'right' })
+  if (roll > 0) chip(ctx, shift.text, iw - pad, chipY + (1 - roll) * (chipH + 10), { fill: UI.surface, stroke: 'rgba(242,238,229,0.5)', color: UI.text, alpha: roll, align: 'right' })
+  ctx.restore()
+  ctx.fillStyle = UI.line
+  ctx.fillRect(0, headerH - 1, iw, 1)
+
+  // Request block, or the empty state before it arrives.
+  if (!reqStarted || reqP < 1) {
+    const emptyAlpha = reqStarted ? 1 - clamp01(reqP * 2) : 1
+    ctx.save()
+    ctx.globalAlpha *= emptyAlpha
+    checkCircle(ctx, iw / 2, headerH + 110, 26, 1, 1, UI.dim)
+    ctx.font = `500 20px "${FAMILY}"`
+    ctx.fillStyle = UI.dim
+    ctx.textAlign = 'center'
+    ctx.fillText('No open requests', iw / 2, headerH + 176)
+    ctx.restore()
+  }
+  if (reqStarted) {
+    const slide = (1 - reqP) * -140
+    // A notification sweep across the top of the screen as the request comes in.
+    if (request.at !== null && t - request.at < 0.7) {
+      const sw = clamp01((t - request.at) / 0.55)
+      ctx.fillStyle = PALETTE.orange
+      ctx.fillRect(0, 0, iw * sw, 4)
+    }
+    ctx.save()
+    ctx.globalAlpha *= clamp01(reqP * 1.6)
+    ctx.translate(0, slide)
+    let y = headerH + 22
+    if (shiftP > 0) {
+      // Still open after the handover: the block gets an orange edge.
+      ctx.save()
+      ctx.globalAlpha *= shiftP
+      ctx.fillStyle = PALETTE.orange
+      roundRect(ctx, 8, y - 4, 4, blockH - 14, 2)
+      ctx.fill()
+      ctx.restore()
+    }
+    const pop = request.at === null ? { alpha: 1, scale: 1 } : punch(t, request.at + 0.25, 0.3, 1.6)
+    const worked = events.find((e) => (e.type === 'note' || e.type === 'action') && eventStarted(e, t))
+    const newAlpha = pop.alpha * (worked ? 1 - eventProgress(worked, t) : 1)
+    if (newAlpha > 0) {
+      ctx.save()
+      ctx.globalAlpha *= newAlpha
+      ctx.translate(pad + 24, y + 15)
+      ctx.scale(pop.scale, pop.scale)
+      ctx.translate(-(pad + 24), -(y + 15))
+      chip(ctx, 'New', pad, y, { fill: PALETTE.orange, color: PALETTE.black, size: 12, h: 28 })
+      ctx.restore()
+    }
+    ctx.font = `500 16px "${FAMILY}"`
+    ctx.fillStyle = UI.dim
+    ctx.textAlign = 'right'
+    ctx.fillText(request.time || tk.time || '', iw - pad, y + 20)
+    ctx.textAlign = 'left'
+    y += 30 + 12
+    drawLines(ctx, title.lines, pad, y, { size: title.size, weight: 700, lineHeight: title.lineHeight, color: UI.text })
+    y += title.lines.length * title.lineHeight
+    if (tk.meta) {
+      ctx.font = `500 17px "${FAMILY}"`
+      ctx.fillStyle = UI.dim
+      ctx.fillText(tk.meta, pad, y + 22)
+      y += 30
+    } else y += 8
+    // Status chip: outlined while the shift works it, filled and pulsing once the shift has gone.
+    const lit = shiftP
+    chip(ctx, tk.status, pad, y + 6, { stroke: PALETTE.orange, color: PALETTE.orange, size: 12, h: 28, alpha: 1 - lit })
+    const dims = chip(ctx, tk.status, pad, y + 6, { fill: PALETTE.orange, color: PALETTE.black, size: 12, h: 28, alpha: lit })
+    if (shift && shiftP >= 1) {
+      const t0 = shift.at === null ? 0 : shift.at + 0.45
+      if (t >= t0) {
+        const q = ((t - t0) % 1.2) / 1.2
+        ctx.save()
+        ctx.globalAlpha *= (1 - q) * 0.8
+        ctx.strokeStyle = PALETTE.orange
+        ctx.lineWidth = 2.5
+        roundRect(ctx, pad - 4 - q * 18, y + 2 - q * 18, dims.w + 8 + q * 36, dims.h + 8 + q * 36, (dims.h + 8) / 2 + q * 18)
+        ctx.stroke()
+        ctx.restore()
+      }
+    }
+    ctx.restore()
+
+    // Activity feed.
+    const feedP = request.at === null ? 1 : enter(t, request.at + 0.3, 0.4)
+    ctx.save()
+    ctx.globalAlpha *= feedP
+    ctx.fillStyle = UI.line
+    ctx.fillRect(pad, feedTop, contentW, 1)
+    drawLabel(ctx, 'Activity', pad, feedTop + 10, { color: UI.dim, size: 13 })
+    ctx.restore()
+    for (const row of rows) {
+      const ev = row.ev
+      const rp = ev === request ? feedP : eventProgress(ev, t)
+      ctx.save()
+      ctx.globalAlpha *= rp
+      ctx.translate(0, (1 - rp) * 18)
+      const ax = pad + 20
+      const ay = row.y + 22
+      if (ev.type === 'action') {
+        const ring = ev.at === null ? 1 : clamp01((t - ev.at - 0.1) / 0.35)
+        const tick = ev.at === null ? 1 : clamp01((t - ev.at - 0.4) / 0.3)
+        checkCircle(ctx, ax, ay, 18, ring, tick, PALETTE.orange)
+      } else if (ev.type === 'shift') {
+        clockIcon(ctx, ax, ay, 17, UI.text)
+      } else {
+        ctx.fillStyle = UI.surface
+        ctx.beginPath()
+        ctx.arc(ax, ay, 19, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.font = `700 14px "${FAMILY}"`
+        ctx.fillStyle = UI.text
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(ev.type === 'request' ? 'R' : initials(ev.by || 'Note'), ax, ay + 1)
+        ctx.textAlign = 'left'
+        ctx.textBaseline = 'alphabetic'
+      }
+      let lines = row.body.lines
+      if (ev.type === 'note' && ev.at !== null) {
+        // A note is typed in; a caret blinks while it is.
+        const total = row.text.length
+        const typed = Math.min(total, Math.floor(clamp01((t - ev.at - 0.1) / 0.75) * total))
+        lines = revealLines(row.body.lines, typed)
+        if (typed < total && lines.length) {
+          const last = lines[lines.length - 1]
+          ctx.font = `500 ${row.body.size}px "${FAMILY}"`
+          const cx = pad + 56 + ctx.measureText(last).width + 3
+          const cy = row.y + 4 + (lines.length - 1) * row.body.lineHeight
+          if (Math.floor(t * 6) % 2 === 0) {
+            ctx.fillStyle = PALETTE.orange
+            ctx.fillRect(cx, cy + 2, 2.5, row.body.size)
+          }
+        }
+      }
+      drawLines(ctx, lines, pad + 56, row.y + 4, { size: row.body.size, weight: 500, lineHeight: row.body.lineHeight, color: UI.text })
+      if (row.meta) {
+        ctx.font = `500 15px "${FAMILY}"`
+        ctx.fillStyle = UI.dim
+        ctx.fillText(row.meta, pad + 56, row.y + 4 + row.body.lines.length * row.body.lineHeight + 18)
+      }
+      ctx.restore()
+    }
+  }
+  ctx.restore() // camera
+  ctx.restore() // clip + interior
+  drawBezelEdge(ctx, card)
+  ctx.restore() // card
+
+  // The fiction is labelled on every frame, under the card, in a colour that reads on cream and black.
+  ctx.save()
+  ctx.font = `700 15px "${FAMILY}"`
+  let dw = -15 * 0.12
+  for (const ch of spec.disclaimer.toUpperCase()) dw += ctx.measureText(ch).width + 15 * 0.12
+  drawLabel(ctx, spec.disclaimer, WIDTH / 2 - dw / 2, card.y + card.h + 20, { color: '#8C8A85', size: 15, alpha: p })
+  ctx.restore()
+
+  // A caption keeps the style it started with: cues that start after lights-out use the dark style.
+  const nightAt = (cue) => {
+    if (spec.theme !== 'light' || !shift) return spec.theme
+    const started = shift.at === null ? 1 : easeInOut(clamp01((cue.start - shift.at - 0.25) / 0.6))
+    return started > 0.5 ? 'dark' : 'light'
+  }
+  drawCaptions(ctx, spec, t, nightAt)
+}
+
+const DRAW = { title: drawTitle, card: drawCard, notes: drawNotes, question: drawQuestion, hero: drawHero, device: drawDevice, presenter: drawPresenter, ticket: drawTicket }
+/** Templates that draw their own captions (over media, or styled per cue). */
+const OWN_CAPTIONS = ['device', 'presenter', 'ticket']
+
+/** The colour a scene should fade to at its end so the cut into `next` (a graphic spec or null) doesn't pop. */
+export function fadeColorBefore(next) {
+  if (!next) return PALETTE.black
+  if (next.continues) return null
+  return colors(next.theme).bg
+}
+
+/**
+ * Draw one frame of a graphic scene at time t (seconds) into ctx. `media` is the slot's current frame.
+ * `fadeTo` is the colour the last 0.22 s fade into (black by default), or null for a hard cut.
+ */
+export function drawGraphicFrame(ctx, spec, t, seconds, media = null, { fadeTo = PALETTE.black } = {}) {
   ctx.save()
   ctx.globalAlpha = 1
   drawBackground(ctx, spec.theme, t, seconds)
   DRAW[spec.template](ctx, spec, t, seconds, media)
-  if (!MEDIA_TEMPLATES.includes(spec.template) && spec.captions.length) drawCaptions(ctx, spec, t)
-  // Short fade to black at the end so cuts between graphics don't pop.
-  const out = clamp01((t - (seconds - 0.22)) / 0.22)
+  if (!OWN_CAPTIONS.includes(spec.template) && spec.captions.length) drawCaptions(ctx, spec, t)
+  // Short fade at the end so cuts between graphics don't pop; skipped when the next scene continues this one.
+  const out = fadeTo ? clamp01((t - (seconds - 0.22)) / 0.22) : 0
   if (out > 0) {
     ctx.globalAlpha = out
-    ctx.fillStyle = PALETTE.black
+    ctx.fillStyle = fadeTo
     ctx.fillRect(0, 0, WIDTH, HEIGHT)
   }
   ctx.restore()
 }
 
 /** Render a single frame to a canvas (used by tests and previews). */
-export function renderGraphicFrame(spec, t, seconds, media = null) {
+export function renderGraphicFrame(spec, t, seconds, media = null, options = {}) {
   ensureFonts()
   const canvas = createCanvas(WIDTH, HEIGHT)
-  drawGraphicFrame(canvas.getContext('2d'), spec, t, seconds, media)
+  drawGraphicFrame(canvas.getContext('2d'), spec, t, seconds, media, options)
   return canvas
 }
 
@@ -857,7 +1382,7 @@ async function mediaFrame(prepared, i, cache) {
  * Render a graphic scene to an H.264 clip of exactly `seconds` by piping raw RGBA frames into
  * ffmpeg. The clip has no audio; the assembly step adds the voiceover (or silence).
  */
-export function renderGraphicClip({ spec, seconds, output, media = null, onProgress, signal }) {
+export function renderGraphicClip({ spec, seconds, output, media = null, fadeTo = PALETTE.black, onProgress, signal }) {
   ensureFonts()
   const frames = Math.max(1, Math.round(seconds * FPS))
   const args = [
@@ -885,7 +1410,7 @@ export function renderGraphicClip({ spec, seconds, output, media = null, onProgr
       for (let i = 0; i < frames; i++) {
         if (signal?.aborted || failed) return child.kill()
         const m = await mediaFrame(media, i, cache)
-        drawGraphicFrame(ctx, spec, i / FPS, seconds, m)
+        drawGraphicFrame(ctx, spec, i / FPS, seconds, m, { fadeTo })
         const rgba = ctx.getImageData(0, 0, WIDTH, HEIGHT).data
         if (onProgress && (i + 1) % 15 === 0) onProgress((i + 1) / frames)
         await write(Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength))

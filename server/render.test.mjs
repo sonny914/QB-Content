@@ -241,22 +241,32 @@ describe('structured timeline with graphic scenes', () => {
       { seconds: 1.5, source: 'graphic', graphic: { template: 'hero', theme: 'light', headline: 'Morning.', accent: 'Morning.', land: 0.3 } },
       { seconds: 2, source: 'graphic', graphic: { template: 'device', theme: 'light', label: 'Day shift', media: 'asset', frame: 'phone', focus: { x: 0.5, y: 0.5, w: 0.4, h: 0.4 }, zoom: { start: 0.3, end: 1.2 }, captions: [{ start: 0.1, end: 1.9, text: 'Day shift logs it,', highlight: 'logs' }] } },
       { seconds: 1.5, source: 'graphic', graphic: { template: 'presenter', media: 'asset', captions: [{ start: 0.1, end: 1.4, text: 'clocks out.' }] } },
-      { seconds: 1, source: 'graphic', graphic: { template: 'presenter', media: 'placeholder' } },
+      { seconds: 1, source: 'graphic', graphic: { template: 'presenter', captions: [{ start: 0.1, end: 0.9, text: 'clocks out.', highlight: 'out.' }] } },
+      { seconds: 1.5, source: 'graphic', graphic: { template: 'ticket', theme: 'light', ticket: { title: 'Leak under the sink', time: '7:42 AM' }, events: [{ type: 'request', at: 0.3 }] } },
+      { seconds: 1.5, source: 'graphic', graphic: { template: 'ticket', theme: 'light', continues: true, ticket: { title: 'Leak under the sink', time: '7:42 AM' }, events: [{ type: 'request' }, { type: 'shift', at: 0.2, text: 'Night shift', time: '3:00 PM' }] } },
     ]
     const { status, body } = await submit({ assets: [fx.orange, fx.clip], timeline })
     expect(status).toBe(202)
     const job = await waitFor(body.id)
     expect(job.error).toBeNull()
-    expect(job.output).toMatchObject({ timeline: 6, graphicCount: 4, assetCount: 4, silent: false })
+    expect(job.output).toMatchObject({ timeline: 9, graphicCount: 6, assetCount: 6, silent: false })
     const res = await fetch(`${base}/api/renders/${body.id}/output`)
     const out = path.join(scratch, 'media-graphics.mp4')
     await (await import('node:fs/promises')).writeFile(out, Buffer.from(await res.arrayBuffer()))
-    const [hero, device, presenter] = await Promise.all([meanColorAt(out, 1.0), meanColorAt(out, 2.5), meanColorAt(out, 4.2)])
+    const [hero, device, presenter, faceless, ticketLight, ticketNight] = await Promise.all([meanColorAt(out, 1.0), meanColorAt(out, 2.5), meanColorAt(out, 4.2), meanColorAt(out, 5.5), meanColorAt(out, 6.5), meanColorAt(out, 8.5)])
     expect(hero[0]).toBeGreaterThan(200) // orange "Morning." fills the centre of the cream frame
     expect(device[0]).toBeGreaterThan(200) // the frame centre is the card, showing the orange fixture
     expect(device[2]).toBeLessThan(80)
     expect(presenter[2]).toBeGreaterThan(150) // the blue clip fills the presenter slot
     expect(presenter[0]).toBeLessThan(90)
+    expect(faceless.every((v) => v < 60)).toBe(true) // faceless presenter on black: no placeholder box in the centre (type sits above it)
+    expect(ticketLight.every((v) => v < 40)).toBe(true) // the dark ticket card fills the centre
+    expect(ticketNight.every((v) => v < 40)).toBe(true)
+    const { run, FFMPEG } = await import('./ffmpeg.mjs')
+    // The light scene's margin is cream before the shift change and black after it.
+    const corner = async (t) => (await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-ss', String(t), '-i', out, '-frames:v', '1', '-vf', 'crop=40:200:10:500,scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'], { binary: true })).stdout
+    expect([...(await corner(6.5))].every((v) => v > 180)).toBe(true)
+    expect([...(await corner(8.6))].every((v) => v < 40)).toBe(true)
   })
 
   it('reports timeline problems before rendering', async () => {
@@ -270,6 +280,9 @@ describe('structured timeline with graphic scenes', () => {
     expect(await bad([{ seconds: 2, source: 'graphic', graphic: { headline: 'x' } }], [fx.orange])).toMatch(/1 asset sent but the timeline uses 0/)
     expect(await bad([{ seconds: 2, source: 'hologram' }])).toMatch(/unknown source "hologram"/)
     expect(await bad([{ seconds: 2, source: 'graphic', graphic: { template: 'device', media: 'asset' } }])).toMatch(/needs an uploaded image or clip for its device slot but only 0 were sent/)
+    expect(await bad([{ seconds: 2, source: 'graphic', graphic: { template: 'device', media: 'none' } }])).toMatch(/device card needs an uploaded screenshot or recording/)
+    expect(await bad([{ seconds: 2, source: 'graphic', graphic: { template: 'ticket', ticket: { title: 'x' }, disclaimer: '' } }])).toMatch(/disclaimer cannot be blank/)
+    expect(await bad([{ seconds: 2, source: 'graphic', graphic: { template: 'presenter', media: 'asset' } }])).toMatch(/needs an uploaded image or clip for its presenter slot/)
     expect(await bad([{ seconds: 0.5, source: 'graphic', graphic: { headline: 'A long enough headline to need reading time', support: 'and more words to read here' } }])).toBeNull()
   })
 

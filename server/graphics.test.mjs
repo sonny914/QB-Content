@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { checkTools, probe } from './ffmpeg.mjs'
 import { meanColorAt } from './fixtures.mjs'
+import * as graphicsModule from './graphics.mjs'
 import {
   ensureFonts,
   fitText,
@@ -150,31 +151,112 @@ describe('frames', () => {
     // The card interior is the orange fixture; the caption shows the highlighted word; the label is there.
     expect(count(frame, isOrange, { x: card.x + 20, y: card.y + 20, w: card.w - 40, h: card.h - 40 })).toBeGreaterThan(card.w * card.h * 0.6)
     expect(count(frame, (r, g, b) => r < 60 && g < 60 && b < 60, { x: 100, y: 1040, w: 520, h: 100 })).toBeGreaterThan(300) // caption text
-    const placeholder = renderGraphicFrame(validateGraphic({ template: 'device', media: 'placeholder' }), 1, 2)
-    expect(count(placeholder, isOrange, { x: card.x, y: card.y, w: card.w, h: card.h })).toBeGreaterThan(100) // "SCREENSHOT" label in the empty slot
+    // A device card has nothing to show without a file: there is no placeholder mode.
+    expect(() => validateGraphic({ template: 'device', media: 'none' })).toThrow(/device card needs an uploaded screenshot or recording/)
+    expect(() => validateGraphic({ template: 'device', media: 'placeholder' })).toThrow(/media must be "asset"/)
   })
 
-  it('presenter: without a clip it draws a labelled empty slot, never a stand-in picture; captions still time', () => {
-    const spec = validateGraphic({ template: 'presenter', media: 'placeholder', captions: [{ start: 0.5, end: 1.5, text: 'tries the easy fix,', highlight: 'easy' }, { start: 1.5, end: 2.5, text: 'clocks out.' }] })
+  it('presenter: faceless by default, the captions become large centred type; nothing stands in for a person', () => {
+    const spec = validateGraphic({ template: 'presenter', captions: [{ start: 0.5, end: 1.5, text: 'tries the easy fix,', highlight: 'easy' }, { start: 1.5, end: 2.5, text: 'clocks out.' }] })
+    expect(spec.media).toBe('none')
     const early = renderGraphicFrame(spec, 0.2, 3)
     const first = renderGraphicFrame(spec, 1.0, 3)
     const second = renderGraphicFrame(spec, 2.0, 3)
+    const middle = { x: 72, y: 300, w: 576, h: 600 }
     const captionZone = { x: 100, y: 1040, w: 520, h: 110 }
-    expect(count(early, isCream, captionZone)).toBe(0)
-    expect(count(first, isOrange, captionZone)).toBeGreaterThan(300) // "easy"
-    expect(count(second, isOrange, captionZone)).toBe(0)
-    expect(count(second, isCream, captionZone)).toBeGreaterThan(300)
-    expect(count(first, isOrange, { x: 60, y: 120, w: 600, h: 60 })).toBeGreaterThan(100) // "PRESENTER CLIP · NOT SUPPLIED" label
+    expect(count(early, isLit, middle)).toBe(0) // nothing before the first cue
+    expect(count(first, isOrange, middle)).toBeGreaterThan(2000) // "easy", large
+    expect(count(first, isCream, middle)).toBeGreaterThan(4000) // the rest of the cue, large
+    expect(count(first, isLit, captionZone)).toBe(0) // not drawn as a small bottom caption
+    expect(count(second, isOrange, middle)).toBe(0)
+    expect(count(second, isCream, middle)).toBeGreaterThan(2000) // "clocks out."
+    expect(count(first, isOrange, { x: 60, y: 100, w: 600, h: 80 })).toBe(0) // no "not supplied" label anywhere
   })
 
   it('validates the new properties', () => {
-    expect(() => validateGraphic({ template: 'device', media: 'url' })).toThrow(/media must be "asset" or "placeholder"/)
+    expect(() => validateGraphic({ template: 'presenter', media: 'placeholder' })).toThrow(/media must be "asset" or "none"/)
     expect(() => validateGraphic({ template: 'hero', headline: 'x', theme: 'sepia' })).toThrow(/theme must be "dark" or "light"/)
     expect(() => validateGraphic({ template: 'device', focus: { x: 0.8, y: 0, w: 0.5, h: 0.5 } })).toThrow(/focus must be/)
     expect(() => validateGraphic({ template: 'device', zoom: { start: 2, end: 1 } })).toThrow(/zoom must be/)
     expect(() => validateGraphic({ template: 'presenter', captions: [{ start: 0, end: 1, text: '' }] })).toThrow(/captions\[0\].text is required/)
     expect(() => validateGraphic({ template: 'presenter', captions: [{ start: 1, end: 0.5, text: 'x' }] })).toThrow(/needs start and end seconds/)
-    expect(validateGraphic({ template: 'presenter' })).toMatchObject({ media: 'asset', headline: '', theme: 'dark', land: 0.3 })
+    expect(validateGraphic({ template: 'presenter' })).toMatchObject({ media: 'none', headline: '', theme: 'dark', land: 0.3, continues: false, ticket: null, events: [] })
+    expect(validateGraphic({ template: 'device' })).toMatchObject({ media: 'asset' })
+  })
+
+  describe('ticket: a fictional request interface driven by events', () => {
+    const ticket = { title: 'Leak under the kitchen sink', meta: 'Unit 4B · Reported by resident', time: '7:42 AM' }
+    const interior = { x: 170, y: 180, w: 380, h: 780 }
+    const block = { x: 200, y: 330, w: 320, h: 210 } // the request block's area inside the card, status chip included
+    const isGrey = (r, g, b) => Math.abs(r - 140) < 14 && Math.abs(g - 138) < 14 && Math.abs(b - 133) < 14
+    const isUiBg = (r, g, b) => r > 10 && r < 26 && g > 10 && g < 26 && b > 10 && b < 26
+
+    it('validates the ticket, its events and the fiction label', () => {
+      const spec = validateGraphic({ template: 'ticket', ticket, events: [{ type: 'request', at: 0.7 }, { type: 'note', text: 'Logged.', by: 'Day shift', time: '7:51 AM' }] })
+      expect(spec.ticket).toEqual({ ...ticket, status: 'Open', shift: 'Day shift', app: 'Requests' })
+      expect(spec.events).toEqual([{ type: 'request', at: 0.7, text: '', by: '', time: '' }, { type: 'note', at: null, text: 'Logged.', by: 'Day shift', time: '7:51 AM' }])
+      expect(spec.disclaimer).toBe('Illustration · not a real app')
+      expect(spec.headline).toBe('') // optional here
+      expect(() => validateGraphic({ template: 'ticket' })).toThrow(/ticket must be an object with at least a title/)
+      expect(() => validateGraphic({ template: 'ticket', ticket: { meta: 'x' } })).toThrow(/ticket.title is required/)
+      expect(() => validateGraphic({ template: 'ticket', ticket, disclaimer: '  ' })).toThrow(/disclaimer cannot be blank/)
+      expect(() => validateGraphic({ template: 'ticket', ticket, events: [{ type: 'alarm' }] })).toThrow(/events\[0\].type must be one of request, note, action, shift/)
+      expect(() => validateGraphic({ template: 'ticket', ticket, events: [{ type: 'note', at: -1, text: 'x' }] })).toThrow(/events\[0\].at must be a time/)
+      expect(() => validateGraphic({ template: 'ticket', ticket, events: [{ type: 'shift' }] })).toThrow(/events\[0\].text is required for a shift event/)
+      expect(() => validateGraphic({ template: 'ticket', ticket: { title: 'x'.repeat(45) } })).toThrow(/ticket.title must be 44 characters or fewer/)
+      expect(() => validateGraphic({ template: 'ticket', ticket, events: new Array(7).fill({ type: 'request' }) })).toThrow(/at most 6 events/)
+      expect(validateGraphic({ template: 'ticket', ticket, continues: true }).continues).toBe(true)
+    })
+
+    it('the request arrives at its time: empty inbox before, title block with a NEW chip after; the label is on every frame', () => {
+      const spec = validateGraphic({ template: 'ticket', theme: 'light', ticket, events: [{ type: 'request', at: 0.7 }] })
+      const before = renderGraphicFrame(spec, 0.6, 3.5)
+      const after = renderGraphicFrame(spec, 1.6, 3.5)
+      expect(count(before, isOrange, block)).toBe(0) // no NEW chip or status chip yet
+      expect(count(after, isOrange, block)).toBeGreaterThan(400)
+      expect(count(after, isCream, block)).toBeGreaterThan(count(before, isCream, block) + 1500) // the title text
+      for (const frame of [before, after]) expect(count(frame, isGrey, { x: 160, y: 985, w: 400, h: 40 })).toBeGreaterThan(150) // "ILLUSTRATION · NOT A REAL APP"
+    })
+
+    it('a note types in, an action draws its check, and a shift change turns the lights out while the request stays lit', () => {
+      const base = { template: 'ticket', theme: 'light', ticket, events: [{ type: 'request' }] }
+      const noted = validateGraphic({ ...base, events: [{ type: 'request' }, { type: 'note', at: 0.4, text: 'Logged. Will check after rounds.', by: 'Day shift', time: '7:51 AM' }] })
+      const typing = renderGraphicFrame(noted, 0.7, 2)
+      const typed = renderGraphicFrame(noted, 1.6, 2)
+      const plain = renderGraphicFrame(validateGraphic(base), 1.6, 2)
+      expect(count(typed, isCream, interior)).toBeGreaterThan(count(typing, isCream, interior) + 300) // more of the note is on screen
+      expect(count(typed, isCream, interior)).toBeGreaterThan(count(plain, isCream, interior) + 1000) // than with no note at all
+
+      const acted = validateGraphic({ ...base, events: [{ type: 'request' }, { type: 'action', at: 0.2, text: 'Tightened the fitting.', by: 'Day shift', time: '11:20 AM' }] })
+      const ring = count(renderGraphicFrame(acted, 0.35, 2), isOrange, interior)
+      const check = count(renderGraphicFrame(acted, 1.2, 2), isOrange, interior)
+      expect(check).toBeGreaterThan(ring + 150) // the circle and tick finish drawing
+
+      const handed = validateGraphic({ ...base, events: [{ type: 'request' }, { type: 'shift', at: 1.0, text: 'Night shift', time: '3:00 PM' }] })
+      const day = renderGraphicFrame(handed, 0.8, 3)
+      const night = renderGraphicFrame(handed, 2.4, 3)
+      const margin = { x: 0, y: 500, w: 100, h: 300 } // left of the card: background only
+      expect(count(day, isCream, margin)).toBeGreaterThan(20_000)
+      expect(count(night, isCream, margin)).toBe(0) // lights out
+      expect(count(night, isLit, margin)).toBe(0)
+      expect(count(night, isOrange, block)).toBeGreaterThan(count(day, isOrange, block) + 300) // "OPEN" fills orange
+      expect(count(night, isUiBg, interior)).toBeGreaterThan(50_000) // the card is still there, lit
+    })
+
+    it('continues: no entrance and no fade, so a ticket carries across a cut', () => {
+      const spec = validateGraphic({ template: 'ticket', theme: 'light', ticket, events: [{ type: 'request' }] })
+      const carried = validateGraphic({ template: 'ticket', theme: 'light', ticket, events: [{ type: 'request' }], continues: true })
+      expect(count(renderGraphicFrame(spec, 0, 2), isUiBg, interior)).toBe(0) // the card is still rising in
+      expect(count(renderGraphicFrame(carried, 0, 2), isUiBg, interior)).toBeGreaterThan(50_000) // already there
+      const { fadeColorBefore, PALETTE } = graphicsModule
+      expect(fadeColorBefore(carried)).toBeNull()
+      expect(fadeColorBefore(spec)).toBe(PALETTE.cream)
+      expect(fadeColorBefore(validateGraphic({ headline: 'x' }))).toBe(PALETTE.black)
+      expect(fadeColorBefore(null)).toBe(PALETTE.black)
+      const lastFrame = (fadeTo) => count(renderGraphicFrame(spec, 1.99, 2, null, { fadeTo }), isLit)
+      expect(lastFrame(null)).toBeGreaterThan(lastFrame(PALETTE.black) + 100_000) // a hard cut keeps the picture to the last frame
+      expect(count(renderGraphicFrame(spec, 1.99, 2, null, { fadeTo: PALETTE.cream }), isCream, { x: 0, y: 0, w: 60, h: 200 })).toBeGreaterThan(10_000) // fading into cream, not black
+    })
   })
 
   it('renders a clip of exactly the requested length with the text visible', async () => {

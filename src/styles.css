@@ -180,4 +180,7 @@ p.warn { margin: 10px 0 0; }
 
 .caption-row { display: grid; grid-template-columns: 72px 72px minmax(120px, 2fr) minmax(80px, 1fr) auto; gap: 8px; align-items: center; }
 .caption-row input { min-width: 0; }
+.ticket-editor { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--cream-line); border-radius: 8px; }
+.event-row { display: grid; grid-template-columns: minmax(150px, 1.2fr) 72px minmax(140px, 2fr) minmax(70px, 1fr) 80px auto; gap: 8px; align-items: center; }
+.event-row input, .event-row select { min-width: 0; }
 .seconds .field-label { margin-right: 4px; }

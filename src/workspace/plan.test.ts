@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EMPTY_GRAPHIC, EMPTY_PLAN_INPUTS, extractJson, graphicNeedsAsset, graphicReadingSeconds, parsePlan, planSnapshot, scaleScenes, totalSeconds, type ContentPlan } from './plan'
+import { EMPTY_GRAPHIC, EMPTY_PLAN_INPUTS, extractJson, graphicNeedsAsset, graphicReadingSeconds, normaliseScene, parsePlan, planSnapshot, scaleScenes, totalSeconds, type ContentPlan, type GraphicSpec } from './plan'
 import { buildPlanningPrompt } from './planPrompt'
 
 const valid = {
@@ -136,7 +136,7 @@ describe('graphic scenes', () => {
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.errors).toEqual([
-      'scenes[0].graphic.template must be one of title, card, notes, question, hero, device, presenter (got "poster").',
+      'scenes[0].graphic.template must be one of title, card, notes, question, hero, device, presenter, ticket (got "poster").',
       'scenes[0].graphic.headline is required.',
       'scenes[0].graphic.items[0].text is required.',
       'scenes[0].graphic.emphasize must be "headline" or an item index 0 to 0 (got 5).',
@@ -149,14 +149,14 @@ describe('graphic scenes', () => {
   it('accepts media, caption and motion properties and rejects bad ones with paths', () => {
     const r = parsePlan(JSON.stringify({ ...valid, scenes: [
       { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'device', theme: 'light', label: 'Day shift', media: 'asset', frame: 'phone', focus: { x: 0.2, y: 0.3, w: 0.5, h: 0.3 }, zoom: { start: 0.5, end: 2 }, captions: [{ start: 0.2, end: 2.4, text: 'Day shift logs it,', highlight: 'logs' }] } },
-      { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'presenter', media: 'placeholder' } },
+      { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'presenter' } },
       { narration: 'n', visual: 'v', seconds: 4, kind: 'graphic', graphic: { template: 'hero', theme: 'light', headline: 'Morning.', accent: 'Morning.', land: 0.8, support: 'A leak.', beat: 2 } },
     ] }))
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.plan.scenes[0].graphic).toMatchObject({ template: 'device', theme: 'light', media: 'asset', frame: 'phone', focus: { x: 0.2, y: 0.3, w: 0.5, h: 0.3 }, zoom: { start: 0.5, end: 2 } })
     expect(r.plan.scenes[0].graphic?.captions[0]).toEqual({ start: 0.2, end: 2.4, text: 'Day shift logs it,', highlight: 'logs' })
-    expect(r.plan.scenes[1].graphic).toMatchObject({ template: 'presenter', media: 'placeholder', headline: '' })
+    expect(r.plan.scenes[1].graphic).toMatchObject({ template: 'presenter', media: 'none', headline: '', continues: false, ticket: null, events: [] })
     expect(r.plan.scenes[2].graphic).toMatchObject({ land: 0.8, beat: 2, accent: 'Morning.' })
     expect(graphicNeedsAsset(r.plan.scenes[0].graphic)).toBe(true)
     expect(graphicNeedsAsset(r.plan.scenes[1].graphic)).toBe(false)
@@ -168,13 +168,59 @@ describe('graphic scenes', () => {
     if (bad.ok) return
     expect(bad.errors).toEqual([
       'scenes[0].graphic.theme must be "dark" or "light".',
-      'scenes[0].graphic.media must be "asset" or "placeholder".',
+      'scenes[0].graphic.media must be "asset": a device card needs an uploaded screenshot or recording.',
       'scenes[0].graphic.frame must be auto, phone or desktop.',
       'scenes[0].graphic.focus must be { x, y, w, h } as fractions of the media that stay inside it.',
       'scenes[0].graphic.zoom must be { start, end } seconds with end after start.',
       'scenes[0].graphic.captions[0].text is required.',
       'scenes[0].graphic.captions[0] needs start and end seconds with end after start.',
     ])
+  })
+
+  it('accepts ticket scenes and names every problem in them', () => {
+    const ticket = { title: 'Leak under the kitchen sink', meta: 'Unit 4B · Reported by resident', time: '7:42 AM' }
+    const r = parsePlan(JSON.stringify({ ...valid, scenes: [
+      { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'ticket', theme: 'light', ticket, events: [{ type: 'request', at: 0.7 }], captions: [{ start: 0.3, end: 2.9, text: 'A resident reports a leak.', highlight: 'leak' }] } },
+      { narration: 'n', visual: 'v', seconds: 2, kind: 'graphic', graphic: { template: 'ticket', theme: 'light', continues: true, ticket, events: [{ type: 'request' }, { type: 'note', at: 0.4, text: 'Logged.', by: 'Day shift', time: '7:51 AM' }] } },
+      { narration: 'n', visual: 'v', seconds: 2, kind: 'graphic', graphic: { template: 'presenter', media: 'none', captions: [{ start: 0.2, end: 1.8, text: 'clocks out.', highlight: 'out.' }] } },
+    ] }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.plan.scenes[0].graphic).toMatchObject({ template: 'ticket', headline: '', disclaimer: 'Illustration · not a real app', continues: false, ticket: { ...ticket, status: 'Open', shift: 'Day shift', app: 'Requests' } })
+    expect(r.plan.scenes[0].graphic?.events).toEqual([{ type: 'request', at: 0.7, text: '', by: '', time: '' }])
+    expect(r.plan.scenes[1].graphic).toMatchObject({ continues: true })
+    expect(r.plan.scenes[1].graphic?.events[1]).toEqual({ type: 'note', at: 0.4, text: 'Logged.', by: 'Day shift', time: '7:51 AM' })
+    expect(r.plan.scenes.every((s) => !graphicNeedsAsset(s.graphic))).toBe(true) // nothing here needs an upload
+    expect(graphicReadingSeconds(r.plan.scenes[0].graphic!)).toBe(2.9) // the title counts as words on screen
+
+    const bad = parsePlan(JSON.stringify({ ...valid, scenes: [
+      { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'ticket', ticket: { meta: 'x'.repeat(61) }, events: [{ type: 'alarm' }, { type: 'note', at: -2 }, { type: 'shift', text: 'x'.repeat(71) }], disclaimer: ' ' } },
+      { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'ticket', ticket: 'soon', events: 'later' } },
+      { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'presenter', media: 'placeholder' } },
+    ] }))
+    expect(bad.ok).toBe(false)
+    if (bad.ok) return
+    expect(bad.errors).toEqual([
+      'scenes[0].graphic.ticket.meta must be 60 characters or fewer.',
+      'scenes[0].graphic.ticket.title is required.',
+      'scenes[0].graphic.events[0].type must be one of request, note, action, shift (got "alarm").',
+      'scenes[0].graphic.events[1].at must be a time in seconds, or omitted for "already happened".',
+      'scenes[0].graphic.events[1].text is required for a note event.',
+      'scenes[0].graphic.events[2].text must be 70 characters or fewer.',
+      'scenes[0].graphic.disclaimer cannot be blank: a fictional interface must say so on screen.',
+      'scenes[1].graphic.ticket must be an object with at least a title.',
+      'scenes[1].graphic.events must be an array.',
+      'scenes[2].graphic.media must be "asset" or "none".',
+    ])
+  })
+
+  it('normalises scenes saved by earlier versions: placeholder slots become faceless', () => {
+    const old = normaliseScene({ id: 's1', narration: 'n', visual: 'v', seconds: 2, kind: 'graphic', graphic: { ...EMPTY_GRAPHIC, template: 'presenter', media: 'placeholder' as GraphicSpec['media'] } })
+    expect(old.graphic?.media).toBe('none')
+    const dev = normaliseScene({ id: 's1', narration: 'n', visual: 'v', seconds: 2, kind: 'graphic', graphic: { ...EMPTY_GRAPHIC, template: 'device', media: 'none' } })
+    expect(dev.graphic?.media).toBe('asset')
+    const tk = normaliseScene({ id: 's1', narration: 'n', visual: 'v', seconds: 2, kind: 'graphic', graphic: { ...EMPTY_GRAPHIC, template: 'ticket', disclaimer: '' } })
+    expect(tk.graphic).toMatchObject({ ticket: { title: '', status: 'Open' }, disclaimer: 'Illustration · not a real app' })
   })
 
   it('reading time counts every word on screen', () => {

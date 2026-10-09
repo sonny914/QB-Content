@@ -2,7 +2,7 @@
 // clips, or motion-graphic scenes drawn locally) plus one voiceover track, or silence when none is
 // attached. Simple assembly: each entry is shown for its assigned seconds. No speech alignment.
 import { FFMPEG, probe, run } from './ffmpeg.mjs'
-import { deviceCard, prepareMedia, readingSeconds, renderGraphicClip, validateGraphic, WIDTH as GW, HEIGHT as GH } from './graphics.mjs'
+import { deviceCard, fadeColorBefore, prepareMedia, readingSeconds, renderGraphicClip, validateGraphic, WIDTH as GW, HEIGHT as GH } from './graphics.mjs'
 
 export const WIDTH = 720
 export const HEIGHT = 1280
@@ -114,7 +114,10 @@ export async function plan({ voiceover, assets, timeline, jobDir }) {
       for (const cue of g.captions) {
         if (cue.end > seconds + 0.05) notes.push(`Scene ${i + 1}: a caption runs to ${cue.end}s but the scene is ${seconds}s.`)
       }
-      const item = { index: i, name: `graphic: ${g.headline || g.template}`, path: `${jobDir}/graphic-${i}.mp4`, kind: 'video', seconds, sourceDuration: seconds, hold: 0, graphic: g, mediaAsset: null }
+      // The scene's end fade matches the next scene's background, or is skipped when that scene continues this one.
+      const next = timeline[i + 1]
+      const fadeTo = fadeColorBefore(next && next.source === 'graphic' ? next.graphic : null)
+      const item = { index: i, name: `graphic: ${g.headline || g.ticket?.title || g.template}`, path: `${jobDir}/graphic-${i}.mp4`, kind: 'video', seconds, sourceDuration: seconds, hold: 0, graphic: g, mediaAsset: null, fadeTo }
       if (entry.assetIndex !== undefined) {
         const asset = assets[entry.assetIndex]
         const info = await probe(asset.path).catch((err) => {
@@ -215,6 +218,7 @@ export async function render({ items, total, voiceover, output, format, onProgre
       seconds: item.seconds,
       output: item.path,
       media,
+      fadeTo: item.fadeTo,
       signal,
       onProgress: (p) => onProgress && onProgress(((drawn + p * item.seconds) / graphicSeconds) * drawShare),
     })

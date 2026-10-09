@@ -58,8 +58,8 @@ for people.
 
 | Property | Rules |
 |---|---|
-| `template` | `title` (headline, optional support), `card` (labelled card with items entering one by one), `notes` (separate notes scattered across the frame; `gather: true` makes them travel into one card mid-scene), `question` (closing question with an orange rule), `hero` (oversized type: the headline punches in at `land`, then shrinks up as `support` lands at `beat`), `device` (an uploaded screenshot or recording on a floating device card, optional push into `focus`), `presenter` (an uploaded clip of the owner to camera, full frame). Default `title`. |
-| `headline` | Required, up to 90 characters. Wrapped and shrunk to fit the frame. |
+| `template` | `title` (headline, optional support), `card` (labelled card with items entering one by one), `notes` (separate notes scattered across the frame; `gather: true` makes them travel into one card mid-scene), `question` (closing question with an orange rule), `hero` (oversized type: the headline punches in at `land`, then shrinks up as `support` lands at `beat`), `ticket` (an original, fictional request-tracking interface on a floating phone card, driven by `events`; see below), `device` (an uploaded screenshot or recording on a floating device card, optional push into `focus`), `presenter` (an uploaded clip of the owner to camera, full frame; faceless without one). Default `title`. |
+| `headline` | Required except for `ticket`, `device` and `presenter`; up to 90 characters. Wrapped and shrunk to fit the frame. |
 | `support` | Optional, up to 160 characters. |
 | `label` | Optional small-caps label such as "Morning", up to 24 characters. |
 | `items` | Up to 4 `{ label, text }` entries (label ≤ 20, text ≤ 60 characters). `notes` needs at least one. |
@@ -67,19 +67,24 @@ for people.
 | `gather` | `notes` only. |
 | `theme` | `dark` (default: black ground, cream type) or `light` (cream ground with a faint dot grid and orange corner forms, black type). |
 | `accent` | Space-separated words drawn in orange wherever they appear in the headline or support line. |
-| `media` | `device` and `presenter` only: `asset` (default) takes the next uploaded image or clip; `placeholder` draws a labelled empty slot and never a stand-in picture. |
+| `media` | `device`: always `asset`, the next uploaded image or clip. `presenter`: `asset` for an uploaded clip of the owner, or `none` (the default): the scene then runs **faceless**, its `captions` drawn as large type in the middle of the frame as each is spoken. Missing footage never blocks a render and nothing stands in for a person. |
 | `frame` | `device` only: `auto` (phone card for portrait media, desktop card for landscape), `phone`, `desktop`. |
 | `focus` | `{ x, y, w, h }` fractions of the media to push into; the push runs over `zoom: { start, end }` seconds (default 0.4–1.6). |
 | `land`, `beat` | `hero` only: seconds when the headline hits (default 0.3) and when the support line takes over (default mid-scene). |
 | `captions` | Up to 12 cues `{ start, end, text, highlight }` in seconds from the scene start, drawn at the bottom with the `highlight` word in orange. Timing is set by hand or from the recording's pauses; nothing aligns them to speech automatically. |
+| `ticket` | `ticket` only. `{ title (required, ≤ 44), meta (≤ 60), time (≤ 12), status (default "Open"), shift (default "Day shift"), app (default "Requests") }`: the fictional request on screen. |
+| `events` | `ticket` only, up to 6 `{ type, at, text, by, time }`. `type` is `request` (the request arrives: the empty inbox gives way to the title block with a NEW chip), `note` (a note is typed into the activity feed and the view pushes in on it), `action` (an action is recorded with a check mark that draws itself) or `shift` (the shift chip rolls over to `text`, a light scene goes dark, and the still-open request lights up and pulses). `at` is seconds from the scene start; leave it out for things that already happened before the scene, so a later scene can carry the ticket on. |
+| `disclaimer` | `ticket` only. Drawn under the card on every frame; defaults to "Illustration · not a real app" and cannot be blank. A fictional interface is always labelled as one. |
+| `continues` | `true` when this scene carries on the previous scene's picture (the same ticket, say): the previous scene then does not fade at the cut and this one skips its entrance. |
 
 Motion is fixed per template: fade-and-rise entrances (items staggered), the emphasis pulse, the
-gather, and a short fade at the end. Colours are QB's black, cream and orange. Text always stays inside
+gather, and a short fade at the end into the next scene's background colour (skipped when the next
+scene `continues` this one). Colours are QB's black, cream and orange. Text always stays inside
 the frame's safe area; a scene with more words than its seconds allow gets a warning (about three words
 per second plus a settle-in second).
 
 `docs/examples/handoff-reel-plan.json` is a complete plan built from graphic scenes only.
-`docs/examples/style-test-plan.json` is the 10.4 s style test: hero → device (takes one uploaded recording) → presenter placeholder, with captions timed to the owner's recording.
+`docs/examples/style-test-plan.json` is the 10.4 s style test, fully faceless: hero → one ticket carried across three scenes (request arrives, note typed, action recorded, shift change), with captions timed to the owner's recording. It needs no uploads.
 
 ## Where it goes
 

@@ -23,11 +23,21 @@ export const PLAN_INPUT_FIELDS: { key: PlanInputField; label: string; multiline:
 
 export const EMPTY_PLAN_INPUTS: PlanInputs = { business: '', audience: '', offer: '', topic: '', tone: '', cta: '' }
 
-export const GRAPHIC_TEMPLATES = ['title', 'card', 'notes', 'question', 'hero', 'device', 'presenter'] as const
+export const GRAPHIC_TEMPLATES = ['title', 'card', 'notes', 'question', 'hero', 'device', 'presenter', 'ticket'] as const
 export type GraphicTemplate = (typeof GRAPHIC_TEMPLATES)[number]
-/** Templates that show an uploaded image or clip in a media slot. */
+/** Templates that can show an uploaded image or clip in a media slot. */
 export const MEDIA_TEMPLATES: readonly GraphicTemplate[] = ['device', 'presenter']
-export const GRAPHIC_LIMITS = { headline: 90, support: 160, label: 24, items: 4, itemLabel: 20, itemText: 60, captions: 12, caption: 80 }
+/** Templates where the headline is optional (the picture or the interface carries the scene). */
+export const OPTIONAL_HEADLINE_TEMPLATES: readonly GraphicTemplate[] = ['device', 'presenter', 'ticket']
+export const EVENT_TYPES = ['request', 'note', 'action', 'shift'] as const
+export type TicketEventType = (typeof EVENT_TYPES)[number]
+export const GRAPHIC_LIMITS = {
+  headline: 90, support: 160, label: 24, items: 4, itemLabel: 20, itemText: 60, captions: 12, caption: 80,
+  ticketTitle: 44, ticketMeta: 60, ticketTime: 12, ticketStatus: 16, ticketShift: 20, ticketApp: 24,
+  events: 6, eventText: 70, eventBy: 20, disclaimer: 48,
+}
+/** Drawn on every frame of a ticket scene unless the plan supplies other wording. It cannot be blank. */
+export const DEFAULT_DISCLAIMER = 'Illustration · not a real app'
 
 export interface GraphicItem {
   label: string
@@ -42,6 +52,27 @@ export interface CaptionCue {
   highlight: string
 }
 
+/** MOCK INTERFACE: the fictional request a ticket scene shows. Drawn by the renderer; labelled on screen. */
+export interface TicketSpec {
+  title: string
+  meta: string
+  time: string
+  status: string
+  shift: string
+  app: string
+}
+
+/** One thing that happens to the ticket. `at` in seconds from the scene start; null = already happened. */
+export interface TicketEvent {
+  type: TicketEventType
+  at: number | null
+  text: string
+  by: string
+  time: string
+}
+
+export const EMPTY_TICKET: TicketSpec = { title: '', meta: '', time: '', status: 'Open', shift: 'Day shift', app: 'Requests' }
+
 /** A motion-graphic scene the local renderer draws itself. Only these properties are understood. */
 export interface GraphicSpec {
   template: GraphicTemplate
@@ -54,8 +85,11 @@ export interface GraphicSpec {
   items: GraphicItem[]
   emphasize: 'headline' | number | null
   gather: boolean
-  /** Media templates: 'asset' takes an uploaded image or clip; 'placeholder' draws a labelled empty slot. */
-  media: 'none' | 'asset' | 'placeholder'
+  /**
+   * Media templates: 'asset' takes an uploaded image or clip. A presenter with 'none' (the default)
+   * runs faceless: its captions become large type. No placeholder is ever drawn into a render.
+   */
+  media: 'none' | 'asset'
   frame: 'auto' | 'phone' | 'desktop'
   /** Region of the media (fractions) the device or presenter pushes into. */
   focus: { x: number; y: number; w: number; h: number } | null
@@ -64,6 +98,12 @@ export interface GraphicSpec {
   land: number
   beat: number | null
   captions: CaptionCue[]
+  /** ticket only: the fictional request, what happens to it, and the on-screen fiction label. */
+  ticket: TicketSpec | null
+  events: TicketEvent[]
+  disclaimer: string
+  /** This scene carries on the previous scene's picture: no fade at the cut, no entrance. */
+  continues: boolean
 }
 
 export interface PlanScene {
@@ -93,6 +133,10 @@ export const EMPTY_GRAPHIC: GraphicSpec = {
   land: 0.3,
   beat: null,
   captions: [],
+  ticket: null,
+  events: [],
+  disclaimer: DEFAULT_DISCLAIMER,
+  continues: false,
 }
 
 /** Validate a graphic spec, collecting every problem. Mirrors server/graphics.mjs. */
@@ -104,7 +148,7 @@ export function validateGraphic(raw: unknown, where: string): { ok: true; spec: 
   const template = (GRAPHIC_TEMPLATES as readonly string[]).includes(templateRaw as string) ? (templateRaw as GraphicTemplate) : null
   if (!template) errors.push(`${where}.template must be one of ${GRAPHIC_TEMPLATES.join(', ')} (got ${show(raw.template)}).`)
   const headline = s(raw.headline)
-  const needsHeadline = !template || !MEDIA_TEMPLATES.includes(template)
+  const needsHeadline = !template || !OPTIONAL_HEADLINE_TEMPLATES.includes(template)
   if (!headline && needsHeadline) errors.push(`${where}.headline is required.`)
   else if (headline.length > GRAPHIC_LIMITS.headline) errors.push(`${where}.headline must be ${GRAPHIC_LIMITS.headline} characters or fewer (got ${headline.length}).`)
   const support = s(raw.support)
@@ -145,9 +189,14 @@ export function validateGraphic(raw: unknown, where: string): { ok: true; spec: 
   const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
   let media: GraphicSpec['media'] = 'none'
-  if (template && MEDIA_TEMPLATES.includes(template)) {
-    media = raw.media === undefined ? 'asset' : (raw.media as GraphicSpec['media'])
-    if (media !== 'asset' && media !== 'placeholder') errors.push(`${where}.media must be "asset" or "placeholder".`)
+  if (template === 'presenter') {
+    const m = raw.media === undefined ? 'none' : raw.media
+    if (m !== 'asset' && m !== 'none') errors.push(`${where}.media must be "asset" or "none".`)
+    else media = m
+  } else if (template === 'device') {
+    const m = raw.media === undefined ? 'asset' : raw.media
+    if (m !== 'asset') errors.push(`${where}.media must be "asset": a device card needs an uploaded screenshot or recording.`)
+    else media = m
   }
   const frameRaw = raw.frame === undefined ? 'auto' : raw.frame
   const frame: GraphicSpec['frame'] = frameRaw === 'phone' || frameRaw === 'desktop' ? frameRaw : 'auto'
@@ -202,26 +251,91 @@ export function validateGraphic(raw: unknown, where: string): { ok: true; spec: 
     }
   }
 
+  let ticket: TicketSpec | null = null
+  const events: TicketEvent[] = []
+  let disclaimer = DEFAULT_DISCLAIMER
+  if (template === 'ticket') {
+    if (!isRecord(raw.ticket)) errors.push(`${where}.ticket must be an object with at least a title.`)
+    else {
+      const tk = raw.ticket
+      const field = (key: keyof TicketSpec, limit: number, fallback = '') => {
+        const v = s(tk[key]) || fallback
+        if (v.length > limit) errors.push(`${where}.ticket.${key} must be ${limit} characters or fewer.`)
+        return v
+      }
+      ticket = {
+        title: field('title', GRAPHIC_LIMITS.ticketTitle),
+        meta: field('meta', GRAPHIC_LIMITS.ticketMeta),
+        time: field('time', GRAPHIC_LIMITS.ticketTime),
+        status: field('status', GRAPHIC_LIMITS.ticketStatus, 'Open'),
+        shift: field('shift', GRAPHIC_LIMITS.ticketShift, 'Day shift'),
+        app: field('app', GRAPHIC_LIMITS.ticketApp, 'Requests'),
+      }
+      if (!ticket.title) errors.push(`${where}.ticket.title is required.`)
+    }
+    if (raw.events !== undefined && raw.events !== null) {
+      if (!Array.isArray(raw.events)) errors.push(`${where}.events must be an array.`)
+      else {
+        if (raw.events.length > GRAPHIC_LIMITS.events) errors.push(`${where}.events can hold at most ${GRAPHIC_LIMITS.events} events.`)
+        raw.events.forEach((ev, i) => {
+          if (!isRecord(ev)) {
+            errors.push(`${where}.events[${i}] must be an object with a type.`)
+            return
+          }
+          const type = (EVENT_TYPES as readonly string[]).includes(ev.type as string) ? (ev.type as TicketEventType) : null
+          if (!type) errors.push(`${where}.events[${i}].type must be one of ${EVENT_TYPES.join(', ')} (got ${show(ev.type)}).`)
+          let at: number | null = null
+          if (ev.at !== undefined && ev.at !== null) {
+            at = n(ev.at)
+            if (at === null || at < 0) errors.push(`${where}.events[${i}].at must be a time in seconds, or omitted for "already happened".`)
+          }
+          const text = s(ev.text)
+          const by = s(ev.by)
+          const time = s(ev.time)
+          if (text.length > GRAPHIC_LIMITS.eventText) errors.push(`${where}.events[${i}].text must be ${GRAPHIC_LIMITS.eventText} characters or fewer.`)
+          if (by.length > GRAPHIC_LIMITS.eventBy) errors.push(`${where}.events[${i}].by must be ${GRAPHIC_LIMITS.eventBy} characters or fewer.`)
+          if (time.length > GRAPHIC_LIMITS.ticketTime) errors.push(`${where}.events[${i}].time must be ${GRAPHIC_LIMITS.ticketTime} characters or fewer.`)
+          if (type && type !== 'request' && !text) errors.push(`${where}.events[${i}].text is required for a ${type} event.`)
+          if (type) events.push({ type, at, text, by, time })
+        })
+      }
+    }
+    if (raw.disclaimer !== undefined && raw.disclaimer !== null) {
+      disclaimer = s(raw.disclaimer)
+      if (!disclaimer) errors.push(`${where}.disclaimer cannot be blank: a fictional interface must say so on screen.`)
+      else if (disclaimer.length > GRAPHIC_LIMITS.disclaimer) errors.push(`${where}.disclaimer must be ${GRAPHIC_LIMITS.disclaimer} characters or fewer.`)
+    }
+  }
+  const continues = raw.continues === true
+
   if (errors.length || !template) return { ok: false, errors }
   return {
     ok: true,
-    spec: { template, theme, headline, support, label, accent, items, emphasize, gather: template === 'notes' && raw.gather === true, media, frame, focus, zoom, land, beat, captions },
+    spec: { template, theme, headline, support, label, accent, items, emphasize, gather: template === 'notes' && raw.gather === true, media, frame, focus, zoom, land, beat, captions, ticket, events, disclaimer, continues },
   }
 }
 
 /** Seconds a viewer needs to read a graphic: a settle-in allowance plus three words per second. */
 export function graphicReadingSeconds(spec: GraphicSpec): number {
-  const words = [spec.headline, spec.support, spec.label, ...spec.items.flatMap((i) => [i.label, i.text])].join(' ').split(/\s+/).filter(Boolean).length
+  const words = [spec.headline, spec.support, spec.label, spec.ticket?.title ?? '', ...spec.items.flatMap((i) => [i.label, i.text])].join(' ').split(/\s+/).filter(Boolean).length
   return r1(1.2 + words / 3)
 }
 
 /** Does this graphic take an uploaded asset for its media slot? */
 export const graphicNeedsAsset = (g: GraphicSpec | null) => Boolean(g && MEDIA_TEMPLATES.includes(g.template) && g.media === 'asset')
 
-/** Fill in defaults for scenes saved before graphics existed. */
+/** Fill in defaults for scenes saved by earlier versions of the app. */
 export function normaliseScene(scene: Partial<PlanScene> & { id: string; narration: string; visual: string; seconds: number }): PlanScene {
   const kind = scene.kind === 'graphic' ? 'graphic' : 'asset'
-  const graphic = kind === 'graphic' ? { ...EMPTY_GRAPHIC, ...(scene.graphic ?? {}) } : scene.graphic ?? null
+  let graphic = kind === 'graphic' ? { ...EMPTY_GRAPHIC, ...(scene.graphic ?? {}) } : scene.graphic ?? null
+  if (graphic) {
+    // Placeholder slots no longer exist: a presenter without a clip runs faceless.
+    const media = graphic.media as string
+    if (media === 'placeholder' || (graphic.template === 'presenter' && media !== 'asset')) graphic = { ...graphic, media: 'none' }
+    if (graphic.template === 'device') graphic = { ...graphic, media: 'asset' }
+    if (graphic.template === 'ticket' && !graphic.ticket) graphic = { ...graphic, ticket: { ...EMPTY_TICKET } }
+    if (!graphic.disclaimer) graphic = { ...graphic, disclaimer: DEFAULT_DISCLAIMER }
+  }
   return { id: scene.id, narration: scene.narration, visual: scene.visual, seconds: scene.seconds, kind, graphic }
 }
 
