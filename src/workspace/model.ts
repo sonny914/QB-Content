@@ -1,5 +1,6 @@
-// Single-reel review workflow: brief, video versions, revision requests and approval.
+// Single-reel review workflow: brief, content plan, video versions, revision requests and approval.
 // Pure state + reducer so the approval rules can be tested without a browser.
+import { EMPTY_PLAN_INPUTS, planSnapshot, planSummary, type ContentPlan, type PlanInputField, type PlanInputs, type PlanScene } from './plan'
 
 export type BriefField = 'title' | 'audience' | 'objective' | 'hook' | 'script' | 'cta'
 export type Brief = Record<BriefField, string>
@@ -26,11 +27,31 @@ export interface VideoVersion {
   version: number
   /** 'rendered' when the local render service assembled it from a voiceover and assets. */
   origin?: 'attached' | 'rendered'
+  /** Set when the render came from the content plan: which plan version and which arrangement of files. */
+  renderSource?: RenderSource
 }
+
+export interface RenderSource {
+  planVersion: number
+  /** Fingerprint of the scene → asset assignments and the voiceover file used for the render. */
+  fingerprint: string
+}
+
+/** The content plan as persisted: the prompt inputs, the imported plan and its edit version. */
+export interface PlanState {
+  inputs: PlanInputs
+  imported: ContentPlan | null
+  /** 0 until a plan is imported; +1 on each import or committed edit. */
+  version: number
+  committedSnapshot: string
+}
+
+export const EMPTY_PLAN_STATE: PlanState = { inputs: { ...EMPTY_PLAN_INPUTS }, imported: null, version: 0, committedSnapshot: '' }
 
 export interface Approval {
   briefSnapshot: string
   briefVersion: number
+  planVersion: number
   videoHash: string
   videoVersion: number
   at: string
@@ -40,6 +61,8 @@ export type ActivityKind =
   | 'created'
   | 'brief_edited'
   | 'sample_loaded'
+  | 'plan_imported'
+  | 'plan_edited'
   | 'video_attached'
   | 'video_rendered'
   | 'video_reattached'
@@ -57,6 +80,7 @@ export interface ActivityEntry {
   text: string
   note?: string
   briefVersion: number
+  planVersion?: number
   videoVersion: number | null
 }
 
@@ -67,6 +91,7 @@ export interface PersistedState {
   committedBrief: Brief
   briefVersion: number
   isSample: boolean
+  plan: PlanState
   status: Status
   approval: Approval | null
   videos: VideoVersion[]
@@ -79,6 +104,8 @@ export interface PersistedState {
 export interface SessionState {
   attached: VideoVersion | null
   watched: boolean
+  /** Fingerprint of the current scene → asset arrangement in the plan panel, or null when there is none. */
+  arrangementFingerprint: string | null
 }
 
 export interface State extends PersistedState {
@@ -90,6 +117,13 @@ export type Action =
   | { type: 'commit'; at: string }
   | { type: 'loadSample'; brief: Brief; at: string }
   | { type: 'attach'; video: Omit<VideoVersion, 'version'>; at: string; detail?: string }
+  | { type: 'planInput'; field: PlanInputField; value: string }
+  | { type: 'importPlan'; plan: ContentPlan; at: string }
+  | { type: 'editScene'; index: number; field: 'narration' | 'visual' | 'seconds'; value: string | number; at: string }
+  | { type: 'replaceScenes'; scenes: PlanScene[]; reason: string; at: string }
+  | { type: 'chooseHook'; index: number; at: string }
+  | { type: 'commitPlan'; at: string }
+  | { type: 'setArrangement'; fingerprint: string | null }
   | { type: 'watched'; at: string }
   | { type: 'requestChanges'; note: string; at: string }
   | { type: 'approve'; at: string }
@@ -102,12 +136,13 @@ export function initialState(at: string): State {
     committedBrief: { ...EMPTY_BRIEF },
     briefVersion: 1,
     isSample: false,
+    plan: { ...EMPTY_PLAN_STATE, inputs: { ...EMPTY_PLAN_INPUTS } },
     status: 'draft',
     approval: null,
     videos: [],
     currentVideoHash: null,
     activity: [],
-    session: { attached: null, watched: false },
+    session: { attached: null, watched: false, arrangementFingerprint: null },
   }
   return log(base, at, 'created', 'Workspace created in Draft')
 }
@@ -116,9 +151,10 @@ export function fromPersisted(p: PersistedState): State {
   // Historical approvals remain in activity; each page load needs explicit review.
   return {
     ...p,
+    plan: p.plan ?? { ...EMPTY_PLAN_STATE, inputs: { ...EMPTY_PLAN_INPUTS } },
     status: p.status === 'approved' ? 'draft' : p.status,
     approval: null,
-    session: { attached: null, watched: false },
+    session: { attached: null, watched: false, arrangementFingerprint: null },
   }
 }
 
@@ -142,8 +178,25 @@ export function isApprovalCurrent(s: State): boolean {
     s.session.attached.hash === s.currentVideoHash &&
     s.session.watched &&
     s.approval.briefSnapshot === snapshot(s.brief) &&
+    s.approval.planVersion === s.plan.version &&
     s.approval.videoHash === s.currentVideoHash
   )
+}
+
+/**
+ * Why the attached preview no longer matches the plan it was rendered from, or null if it does
+ * (or it wasn't rendered from the plan). Shown on the player and used to block approval.
+ */
+export function staleRenderReason(s: State): string | null {
+  const src = s.session.attached?.renderSource
+  if (!src) return null
+  if (src.planVersion !== s.plan.version) {
+    return `This preview was rendered from plan v${src.planVersion}; the plan is now v${s.plan.version}, so the video does not reflect the latest edits. Create the preview again.`
+  }
+  if (s.session.arrangementFingerprint !== null && src.fingerprint !== s.session.arrangementFingerprint) {
+    return 'The assets or voiceover assigned to the scenes changed after this preview was rendered, so the video does not reflect them. Create the preview again.'
+  }
+  return null
 }
 
 /** Reasons approval is blocked right now. Empty means Approve is allowed. */
@@ -158,6 +211,8 @@ export function approvalBlockers(s: State): string[] {
     )
   } else if (s.session.attached.hashKind !== 'sha256') {
     reasons.push('Approval requires SHA-256 verification. Open this app over HTTPS or localhost and reattach the video.')
+  } else if (staleRenderReason(s)) {
+    reasons.push(staleRenderReason(s)!)
   } else if (!s.session.watched) {
     reasons.push('Watch the preview through to the end.')
   }
@@ -177,6 +232,7 @@ function log(
     kind,
     text,
     briefVersion: s.briefVersion,
+    ...(s.plan.version > 0 ? { planVersion: s.plan.version } : {}),
     videoVersion: currentVideo(s)?.version ?? null,
     ...(note !== undefined ? { note } : {}),
   }
@@ -201,8 +257,84 @@ function commit(s: State, at: string): State {
   return log(next, at, 'brief_edited', `Brief v${next.briefVersion}: edited ${changed.map((f) => f.label).join(', ')}`)
 }
 
+/** Bump the plan version when its content differs from the last committed snapshot. */
+function commitPlan(s: State, at: string, detail: string): State {
+  const plan = s.plan.imported
+  if (!plan) return s
+  const snap = planSnapshot(plan)
+  if (snap === s.plan.committedSnapshot) return s
+  const next = { ...s, plan: { ...s.plan, version: s.plan.version + 1, committedSnapshot: snap } }
+  return log(next, at, 'plan_edited', `Plan v${next.plan.version}: ${detail}`)
+}
+
+/** Which scene numbers differ between the committed snapshot and the current plan, for the activity log. */
+function changedScenes(s: State): string {
+  const plan = s.plan.imported
+  if (!plan || !s.plan.committedSnapshot) return 'edited'
+  let committed: [string[], number, string, [string, string, number][], string[]]
+  try {
+    committed = JSON.parse(s.plan.committedSnapshot)
+  } catch {
+    return 'edited'
+  }
+  const parts: string[] = []
+  const scenesBefore = committed[3] ?? []
+  const nums = plan.scenes
+    .map((sc, i) => (scenesBefore[i] && scenesBefore[i][0] === sc.narration && scenesBefore[i][1] === sc.visual && scenesBefore[i][2] === sc.seconds ? null : i + 1))
+    .filter((n): n is number => n !== null)
+  if (nums.length) parts.push(`edited scene${nums.length === 1 ? '' : 's'} ${nums.join(', ')}`)
+  if (committed[1] !== plan.recommendedHook) parts.push(`hook ${plan.recommendedHook + 1} chosen`)
+  return parts.join('; ') || 'edited'
+}
+
 export function reducer(s: State, a: Action): State {
   switch (a.type) {
+    case 'planInput': {
+      if (s.plan.inputs[a.field] === a.value) return s
+      return { ...s, plan: { ...s.plan, inputs: { ...s.plan.inputs, [a.field]: a.value } } }
+    }
+
+    case 'importPlan': {
+      const snap = planSnapshot(a.plan)
+      let next: State = { ...s, plan: { ...s.plan, imported: a.plan, version: s.plan.version + 1, committedSnapshot: snap } }
+      next = backToDraft(next, a.at, s.plan.imported ? 'plan replaced' : 'plan imported')
+      return log(next, a.at, 'plan_imported', `Plan v${next.plan.version} imported: ${planSummary(a.plan)}`)
+    }
+
+    case 'editScene': {
+      const plan = s.plan.imported
+      if (!plan || !plan.scenes[a.index]) return s
+      const scene = plan.scenes[a.index]
+      const value = a.field === 'seconds' ? Math.round(Number(a.value) * 10) / 10 : String(a.value)
+      if (scene[a.field] === value) return s
+      const scenes = plan.scenes.map((sc, i) => (i === a.index ? { ...sc, [a.field]: value } : sc))
+      const next = { ...s, plan: { ...s.plan, imported: { ...plan, scenes } } }
+      return backToDraft(next, a.at, 'plan edited')
+    }
+
+    case 'replaceScenes': {
+      const plan = s.plan.imported
+      if (!plan) return s
+      let next: State = { ...s, plan: { ...s.plan, imported: { ...plan, scenes: a.scenes } } }
+      next = backToDraft(next, a.at, 'plan edited')
+      return commitPlan(next, a.at, a.reason)
+    }
+
+    case 'chooseHook': {
+      const plan = s.plan.imported
+      if (!plan || a.index < 0 || a.index >= plan.hooks.length || plan.recommendedHook === a.index) return s
+      let next: State = { ...s, plan: { ...s.plan, imported: { ...plan, recommendedHook: a.index } } }
+      next = backToDraft(next, a.at, 'plan edited')
+      return commitPlan(next, a.at, changedScenes(next))
+    }
+
+    case 'commitPlan':
+      return commitPlan(s, a.at, changedScenes(s))
+
+    case 'setArrangement':
+      if (s.session.arrangementFingerprint === a.fingerprint) return s
+      return { ...s, session: { ...s.session, arrangementFingerprint: a.fingerprint } }
+
     case 'edit': {
       if (s.brief[a.field] === a.value) return s
       const next = { ...s, brief: { ...s.brief, [a.field]: a.value } }
@@ -228,7 +360,7 @@ export function reducer(s: State, a: Action): State {
         ...s,
         videos: known ? s.videos : [...s.videos, version],
         currentVideoHash: version.hash,
-        session: { attached: version, watched: false },
+        session: { ...s.session, attached: version, watched: false },
       }
       const rendered = a.video.origin === 'rendered'
       const describe = (v: VideoVersion) =>
@@ -259,22 +391,24 @@ export function reducer(s: State, a: Action): State {
       const note = a.note.trim()
       if (!note) return s
       const wasApproved = s.status === 'approved'
-      const next = { ...commit(s, a.at), status: 'changes_requested' as const, approval: null }
+      const next = { ...commitPlan(commit(s, a.at), a.at, changedScenes(s)), status: 'changes_requested' as const, approval: null }
       return log(next, a.at, 'changes_requested', wasApproved ? 'Changes requested (approval withdrawn)' : 'Changes requested', note)
     }
 
     case 'approve': {
-      const next = commit(s, a.at)
+      const next = commitPlan(commit(s, a.at), a.at, changedScenes(s))
       if (approvalBlockers(next).length > 0) return next
       const video = next.session.attached!
       const approval: Approval = {
         briefSnapshot: snapshot(next.brief),
         briefVersion: next.briefVersion,
+        planVersion: next.plan.version,
         videoHash: video.hash,
         videoVersion: video.version,
         at: a.at,
       }
-      return log({ ...next, status: 'approved', approval }, a.at, 'approved', `Approved brief v${approval.briefVersion} with video v${approval.videoVersion}`)
+      const planPart = next.plan.version > 0 ? `, plan v${approval.planVersion}` : ''
+      return log({ ...next, status: 'approved', approval }, a.at, 'approved', `Approved brief v${approval.briefVersion}${planPart} with video v${approval.videoVersion}`)
     }
 
     case 'reset':

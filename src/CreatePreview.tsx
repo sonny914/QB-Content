@@ -1,38 +1,18 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
-import {
-  deleteJob,
-  fetchHealth,
-  fetchOutput,
-  getJob,
-  mediaDuration,
-  submitRender,
-  type RenderHealth,
-  type RenderOutput,
-} from './workspace/renderClient'
+import { mediaDuration, type RenderHealth } from './workspace/renderClient'
+import { formatSize, r1, toLibraryAssets, type LibraryAsset } from './workspace/assets'
+import { useRender, type RenderedPreview } from './workspace/useRender'
+import { RenderStatus, serviceReady } from './RenderStatus'
 
 const MIN_SECONDS = 0.5
 const MAX_SECONDS = 300
-const r1 = (n: number) => Math.round(n * 10) / 10
 
-interface Asset {
-  id: number
-  file: File
-  kind: 'image' | 'video'
-  url: string
-  /** Source clip length when the browser can read it; null for images or undecodable clips. */
-  sourceDuration: number | null
+interface Asset extends LibraryAsset {
   seconds: number
 }
 
-type Phase = 'idle' | 'uploading' | 'checking' | 'rendering' | 'loading' | 'done' | 'failed'
-
-export interface RenderedPreview {
-  file: File
-  output: RenderOutput
-  notes: string[]
-}
-
 interface Props {
+  health: RenderHealth | null
   onRendered: (preview: RenderedPreview) => Promise<void> | void
 }
 
@@ -45,40 +25,21 @@ export function evenSplit(total: number, count: number): number[] {
   return out
 }
 
-const formatSize = (bytes: number) =>
-  bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
-
-export default function CreatePreview({ onRendered }: Props) {
-  const [health, setHealth] = useState<RenderHealth | null>(null)
+/** Free-form assembly: any voiceover plus any ordered assets, no plan needed. */
+export default function CreatePreview({ health, onRendered }: Props) {
   const [voice, setVoice] = useState<{ file: File; duration: number | null } | null>(null)
   const [assets, setAssets] = useState<Asset[]>([])
   const [autoSplit, setAutoSplit] = useState(true)
-  const [phase, setPhase] = useState<Phase>('idle')
-  const [progress, setProgress] = useState(0)
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState('')
-  const [notes, setNotes] = useState<string[]>([])
-  const nextId = useRef(1)
+  const render = useRender()
   const voiceInput = useRef<HTMLInputElement>(null)
   const assetInput = useRef<HTMLInputElement>(null)
-  const cancelled = useRef(false)
-
-  useEffect(() => {
-    let alive = true
-    fetchHealth().then((h) => alive && setHealth(h))
-    return () => {
-      alive = false
-    }
-  }, [])
 
   // Object URLs for thumbnails are released when an asset leaves the list or the panel unmounts.
   useEffect(() => () => assets.forEach((a) => URL.revokeObjectURL(a.url)), [assets])
-  useEffect(() => () => void (cancelled.current = true), [])
 
-  const busy = phase === 'uploading' || phase === 'checking' || phase === 'rendering' || phase === 'loading'
+  const busy = render.busy
   const timeline = r1(assets.reduce((sum, a) => sum + a.seconds, 0))
   const voiceDuration = voice?.duration ?? null
-  const serviceOk = health?.reachable === true && health.ok
 
   function applySplit(list: Asset[], total: number | null): Asset[] {
     if (total === null || list.length === 0) return list
@@ -92,8 +53,7 @@ export default function CreatePreview({ onRendered }: Props) {
     if (!file) return
     const duration = await mediaDuration(file, 'audio')
     setVoice({ file, duration })
-    setPhase('idle')
-    setError('')
+    render.reset()
     if (autoSplit) setAssets((list) => applySplit(list, duration))
   }
 
@@ -101,20 +61,8 @@ export default function CreatePreview({ onRendered }: Props) {
     const files = Array.from(e.target.files ?? [])
     e.target.value = ''
     if (files.length === 0) return
-    const added: Asset[] = []
-    for (const file of files) {
-      const kind: Asset['kind'] = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv|avi|mpe?g|3gp)$/i.test(file.name) ? 'video' : 'image'
-      added.push({
-        id: nextId.current++,
-        file,
-        kind,
-        url: URL.createObjectURL(file),
-        sourceDuration: kind === 'video' ? await mediaDuration(file, 'video') : null,
-        seconds: 3,
-      })
-    }
-    setPhase('idle')
-    setError('')
+    const added = (await toLibraryAssets(files)).map((a) => ({ ...a, seconds: 3 }))
+    render.reset()
     setAssets((list) => {
       const merged = [...list, ...added]
       return autoSplit ? applySplit(merged, voiceDuration) : merged
@@ -153,80 +101,24 @@ export default function CreatePreview({ onRendered }: Props) {
     setAssets((list) => applySplit(list, voiceDuration))
   }
 
-  async function create() {
-    if (!voice || assets.length === 0 || busy) return
-    cancelled.current = false
-    setError('')
-    setNotes([])
-    setProgress(0)
-    setPhase('uploading')
-    setMessage('Sending files to the local render process')
-    let jobId: string | null = null
-    try {
-      const form = new FormData()
-      form.append('durations', JSON.stringify(assets.map((a) => a.seconds)))
-      form.append('voiceover', voice.file, voice.file.name)
-      for (const a of assets) form.append('asset', a.file, a.file.name)
-      jobId = await submitRender(form, (f) => setProgress(f))
-
-      // Poll until the service reports done or failed.
-      for (;;) {
-        if (cancelled.current) return
-        const job = await getJob(jobId)
-        setNotes(job.notes)
-        if (job.status === 'failed') throw new Error(job.error ?? 'Render failed')
-        if (job.status === 'done' && job.output) {
-          setPhase('loading')
-          setProgress(1)
-          setMessage('Loading the preview into the player')
-          const file = await fetchOutput(jobId, job.output)
-          await onRendered({ file, output: job.output, notes: job.notes })
-          setPhase('done')
-          setMessage(`Preview ready: ${job.output.width}×${job.output.height}, ${r1(job.output.duration)}s, ${formatSize(job.output.size)}`)
-          break
-        }
-        setPhase(job.status === 'rendering' ? 'rendering' : 'checking')
-        setProgress(job.status === 'rendering' ? job.progress : 0)
-        setMessage(job.message)
-        await new Promise((r) => setTimeout(r, 500))
-      }
-    } catch (err) {
-      setPhase('failed')
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      // The player holds the file now; the temporary job folder can go.
-      if (jobId) void deleteJob(jobId)
-    }
+  function create() {
+    if (!voice || assets.length === 0) return
+    void render.run({ voice: voice.file, assets: assets.map((a) => a.file), durations: assets.map((a) => a.seconds) }, onRendered)
   }
 
-  const canCreate = Boolean(voice && assets.length > 0 && serviceOk && !busy)
+  const canCreate = Boolean(voice && assets.length > 0 && serviceReady(health) && !busy)
 
   return (
     <section className="panel" aria-labelledby="create-h">
       <div className="panel-head">
-        <h2 id="create-h">Create a preview</h2>
+        <h2 id="create-h">Create a preview (free-form)</h2>
         <span className="status-meta">Assembles your files. No generation.</span>
       </div>
       <p className="empty">
-        Your recorded voiceover plus images or clips, each shown for a set number of seconds, rendered on this computer
-        into a vertical 720×1280 MP4. Clip audio is muted so it can't compete with the narration.
+        Any voiceover plus any images or clips, each shown for a set number of seconds, rendered on this computer into a
+        vertical 720×1280 MP4. Clip audio is muted so it can't compete with the narration. For a plan-driven reel, use the
+        Content plan panel instead.
       </p>
-
-      {health === null ? (
-        <p className="empty">Checking the local render service…</p>
-      ) : !health.reachable ? (
-        <div className="warn" role="alert" data-testid="service-warning">
-          <strong>{health.error}</strong> Start the app with <code>npm run dev</code>, which runs the page and the render
-          service together, or run <code>npm run render-service</code> in a second terminal.
-        </div>
-      ) : !health.ok ? (
-        <div className="warn" role="alert" data-testid="service-warning">
-          <strong>Rendering is unavailable: {health.tools.problem}</strong> The render service needs FFmpeg with
-          ffprobe, libx264 and AAC on this computer, on the PATH. Install it and restart <code>npm run dev</code>:
-          Windows <code>winget install Gyan.FFmpeg</code> (then open a new terminal), macOS{' '}
-          <code>brew install ffmpeg</code>, Debian/Ubuntu <code>sudo apt install ffmpeg</code>.
-        </div>
-      ) : null}
 
       <div className="field">
         <span className="field-label" id="voice-label">Voiceover</span>
@@ -354,25 +246,7 @@ export default function CreatePreview({ onRendered }: Props) {
         </button>
       </div>
 
-      {phase !== 'idle' && (
-        <div className="render-status" aria-live="polite" data-testid="render-status">
-          {busy && (
-            <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
-              <div className="progress-bar" style={{ width: `${Math.round(progress * 100)}%` }} />
-            </div>
-          )}
-          <p className={phase === 'failed' ? 'error' : 'status-meta'} data-testid="render-message">
-            {phase === 'failed' ? error : `${message}${busy && phase !== 'checking' ? ` · ${Math.round(progress * 100)}%` : ''}`}
-          </p>
-          {notes.length > 0 && (
-            <ul className="notes" data-testid="render-notes">
-              {notes.map((n) => (
-                <li key={n}>{n}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+      <RenderStatus state={render} testId="render-status" />
     </section>
   )
 }

@@ -53,8 +53,8 @@ test('creates a preview from a voiceover and assets, then review, approve and do
   await expect(page.getByTestId('download')).toBeDisabled()
 
   await page.getByTestId('create-preview').click()
-  await expect(page.getByTestId('render-message')).toContainText('Preview ready: 720×1280, 3.5s', { timeout: 60_000 })
-  await expect(page.getByTestId('render-notes')).toContainText('shorter than the voiceover')
+  await expect(page.getByTestId('render-status-message')).toContainText('Preview ready: 720×1280, 3.5s', { timeout: 60_000 })
+  await expect(page.getByTestId('render-status-notes')).toContainText('shorter than the voiceover')
 
   // The render landed in the review player as video v1, unapproved and unwatched.
   await expect(page.getByTestId('player')).toBeVisible()
@@ -87,7 +87,7 @@ test('creates a preview from a voiceover and assets, then review, approve and do
   await page.getByTestId('asset-input').setInputFiles([CLIP])
   await expect(page.getByTestId('short-clip')).toContainText('This clip is 1s but set to')
   await page.getByTestId('create-preview').click()
-  await expect(page.getByTestId('render-message')).toContainText('Preview ready', { timeout: 60_000 })
+  await expect(page.getByTestId('render-status-message')).toContainText('Preview ready', { timeout: 60_000 })
   await expect(page.getByTestId('video-version')).toContainText('Video v2')
   await expect(status(page)).toHaveText('Draft')
   await expect(page.getByTestId('activity')).toContainText('Approval withdrawn: new render')
@@ -111,6 +111,6 @@ test('a failed render shows the service error', async ({ page }) => {
   await page.getByTestId('voice-input').setInputFiles(ORANGE) // an image is not a voiceover
   await page.getByTestId('asset-input').setInputFiles([CREAM])
   await page.getByTestId('create-preview').click()
-  await expect(page.getByTestId('render-message')).toContainText('not a supported audio type', { timeout: 30_000 })
+  await expect(page.getByTestId('render-status-message')).toContainText('not a supported audio type', { timeout: 30_000 })
   await expect(page.getByTestId('player')).toHaveCount(0)
 })

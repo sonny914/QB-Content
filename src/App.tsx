@@ -6,14 +6,19 @@ import {
   isApprovalCurrent,
   reducer,
   snapshot,
+  staleRenderReason,
   EMPTY_BRIEF,
   type ActivityEntry,
+  type RenderSource,
   type Status,
 } from './workspace/model'
 import { SAMPLE_BRIEF } from './workspace/sample'
 import { identifyVideo } from './workspace/hash'
 import { browserStorage, clearState, loadState, saveState } from './workspace/storage'
-import CreatePreview, { type RenderedPreview } from './CreatePreview'
+import CreatePreview from './CreatePreview'
+import ContentPlan from './ContentPlan'
+import { ServiceNotice } from './RenderStatus'
+import { useRenderHealth, type RenderedPreview } from './workspace/useRender'
 
 const NOTE_DRAFT_KEY = 'qb-content:revision-note-draft:v1'
 const now = () => new Date().toISOString()
@@ -27,8 +32,7 @@ const STATUS_LABEL: Record<Status, string> = {
 const formatTime = (iso: string) =>
   new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso))
 
-const formatSize = (bytes: number) =>
-  bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
+import { formatSize } from './workspace/assets'
 
 const shortHash = (hash: string) => (hash.startsWith('sha256:') ? `SHA-256 ${hash.slice(7, 19)}…` : 'name/size fingerprint')
 
@@ -53,6 +57,7 @@ export default function App() {
   const fileCheckId = useRef(0)
   const fileInput = useRef<HTMLInputElement>(null)
   const noteInput = useRef<HTMLTextAreaElement>(null)
+  const health = useRenderHealth()
 
   useEffect(() => setSaved(saveState(store, state)), [store, state])
 
@@ -71,9 +76,10 @@ export default function App() {
   const attached = state.session.attached
   const pairedVideo = currentVideo(state)
   const briefEmpty = snapshot(state.brief) === snapshot(EMPTY_BRIEF)
+  const stale = staleRenderReason(state)
 
   /** Hash a file and make it the current video version. Used for picked files and local renders alike. */
-  async function attachFile(file: File, origin: 'attached' | 'rendered', detail?: string) {
+  async function attachFile(file: File, origin: 'attached' | 'rendered', detail?: string, renderSource?: RenderSource) {
     const checkId = ++fileCheckId.current
     setChecking(true)
     setFileError('')
@@ -82,7 +88,7 @@ export default function App() {
       if (checkId !== fileCheckId.current) return
       setPlayError(false)
       setVideoUrl(URL.createObjectURL(file))
-      dispatch({ type: 'attach', video: { ...video, origin }, at: now(), detail })
+      dispatch({ type: 'attach', video: { ...video, origin, ...(renderSource ? { renderSource } : {}) }, at: now(), detail })
     } catch {
       if (checkId === fileCheckId.current) {
         setFileError('Could not read or verify this file. Choose it again or try another local video. The previous preview has not changed.')
@@ -101,6 +107,16 @@ export default function App() {
   async function onRendered({ file, output }: RenderedPreview) {
     const seconds = Math.round(output.duration * 10) / 10
     await attachFile(file, 'rendered', `${output.assetCount} asset${output.assetCount === 1 ? '' : 's'} + voiceover, ${seconds}s`)
+  }
+
+  async function onRenderedFromPlan({ file, output }: RenderedPreview, source: RenderSource) {
+    const seconds = Math.round(output.duration * 10) / 10
+    await attachFile(
+      file,
+      'rendered',
+      `from plan v${source.planVersion}: ${output.assetCount} scene${output.assetCount === 1 ? '' : 's'} + voiceover, ${seconds}s`,
+      source,
+    )
   }
 
   function onRequestChanges() {
@@ -160,13 +176,14 @@ export default function App() {
         </span>
         <span className="status-meta">
           Brief v{state.briefVersion}
+          {state.plan.version > 0 && ` · Plan v${state.plan.version}`}
           {' · '}
           {pairedVideo ? `Video v${pairedVideo.version}` : 'No video'}
         </span>
         {approvedNow && state.approval && (
           <span className="status-meta" data-testid="approval-summary">
-            Approved {formatTime(state.approval.at)} for brief v{state.approval.briefVersion} + video v
-            {state.approval.videoVersion}
+            Approved {formatTime(state.approval.at)} for brief v{state.approval.briefVersion}
+            {state.approval.planVersion > 0 && ` + plan v${state.approval.planVersion}`} + video v{state.approval.videoVersion}
           </span>
         )}
       </section>
@@ -203,7 +220,9 @@ export default function App() {
             })}
           </section>
 
-          <CreatePreview onRendered={onRendered} />
+          <ServiceNotice health={health} />
+          <ContentPlan plan={state.plan} dispatch={dispatch} health={health} onRendered={onRenderedFromPlan} />
+          <CreatePreview health={health} onRendered={onRendered} />
         </div>
 
         <div className="side">
@@ -240,12 +259,17 @@ export default function App() {
                 {playError && (
                   <p className="error">This browser can't play this file, so it can't be reviewed or approved here.</p>
                 )}
+                {stale && (
+                  <p className="warn" role="status" data-testid="stale-render">
+                    <strong>Out of date.</strong> {stale}
+                  </p>
+                )}
                 <dl className="video-meta">
                   <div>
                     <dt>File</dt>
                     <dd>
                       {attached.name} · {formatSize(attached.size)}
-                      {attached.origin === 'rendered' && ' · rendered locally'}
+                      {attached.origin === 'rendered' && (attached.renderSource ? ` · rendered locally from plan v${attached.renderSource.planVersion}` : ' · rendered locally')}
                     </dd>
                   </div>
                   <div>
@@ -358,6 +382,7 @@ function ActivityItem({ entry }: { entry: ActivityEntry }) {
       {entry.note && <blockquote className="act-note">{entry.note}</blockquote>}
       <div className="act-ver">
         Brief v{entry.briefVersion}
+        {entry.planVersion !== undefined && ` · Plan v${entry.planVersion}`}
         {entry.videoVersion !== null && ` · Video v${entry.videoVersion}`}
       </div>
     </li>

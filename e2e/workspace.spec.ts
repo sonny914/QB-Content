@@ -81,7 +81,7 @@ test('approval needs a watched video and is withdrawn by brief edits and video r
 
 test('after a reload the brief, notes and activity persist but the video must be reattached and rewatched', async ({ page }) => {
   await page.getByLabel('Title').fill('Persisted title')
-  await page.getByLabel('Script').fill('Line one\nLine two')
+  await page.getByLabel('Script', { exact: true }).fill('Line one\nLine two')
   await attach(page, VIDEO_A)
   await page.getByLabel('Revision note').fill('Trim the pause at 0:04')
   await page.getByRole('button', { name: 'Request changes' }).click()
@@ -90,7 +90,7 @@ test('after a reload the brief, notes and activity persist but the video must be
   await page.reload()
 
   await expect(page.getByLabel('Title')).toHaveValue('Persisted title')
-  await expect(page.getByLabel('Script')).toHaveValue('Line one\nLine two')
+  await expect(page.getByLabel('Script', { exact: true })).toHaveValue('Line one\nLine two')
   await expect(page.getByLabel('Revision note')).toHaveValue('Unsent draft note')
   await expect(status(page)).toHaveText('Changes requested')
   await expect(activity(page)).toContainText('Trim the pause at 0:04')

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { approvalBlockers, initialState, isApprovalCurrent, reducer, type Action, type State } from './model'
 import { SAMPLE_BRIEF } from './sample'
 import { loadState, saveState, STORAGE_KEY } from './storage'
+import { staleRenderReason } from './model'
+import { parsePlan, type ContentPlan } from './plan'
 
 const AT = '2026-10-09T12:00:00.000Z'
 const videoA = { hash: 'sha256:aaa', hashKind: 'sha256' as const, name: 'reel-a.webm', size: 100 }
@@ -135,7 +137,7 @@ describe('local persistence', () => {
     expect(loaded.brief.hook).toBe('Saved hook')
     expect(loaded.activity).toEqual(s.activity)
     expect(loaded.activity.some((e) => e.note === 'Shorter intro')).toBe(true)
-    expect(loaded.session).toEqual({ attached: null, watched: false })
+    expect(loaded.session).toEqual({ attached: null, watched: false, arrangementFingerprint: null })
   })
 
   it('after a reload, approval needs the video reattached and watched again', () => {
@@ -215,5 +217,107 @@ describe('approval reliability regressions', () => {
     const s = run(loadState(store, AT), { type: 'attach', video: legacy.videos[0], at: AT }, watched, approve)
     expect(isApprovalCurrent(s)).toBe(false)
     expect(s.status).toBe('draft')
+  })
+})
+
+describe('content plan rules', () => {
+  const planJson = {
+    format: 'qb-content-plan',
+    version: 1,
+    hooks: ['Hook A', 'Hook B', 'Hook C'],
+    recommendedHook: 0,
+    script: 'One. Two.',
+    scenes: [
+      { narration: 'One.', visual: 'First visual', seconds: 2 },
+      { narration: 'Two.', visual: 'Second visual', seconds: 2 },
+    ],
+    claimsToVerify: ['Confirm the opening year'],
+  }
+  const plan = (parsePlan(JSON.stringify(planJson)) as { ok: true; plan: ContentPlan }).plan
+  const imported = () => reducer(initialState(AT), { type: 'importPlan', plan, at: AT })
+  const fromPlan = (fingerprint = 'fp-1', planVersion = 1) =>
+    ({ hash: 'sha256:ddd', hashKind: 'sha256' as const, name: 'qb-preview.mp4', size: 400, origin: 'rendered' as const, renderSource: { planVersion, fingerprint } })
+
+  it('imports a plan as v1 and logs a summary', () => {
+    const s = imported()
+    expect(s.plan.version).toBe(1)
+    expect(s.plan.imported?.scenes).toHaveLength(2)
+    expect(s.activity.at(-1)).toMatchObject({ kind: 'plan_imported', text: 'Plan v1 imported: 3 hooks, 2 scenes, 4s', planVersion: 1 })
+  })
+
+  it('plan inputs persist without creating versions or touching approval', () => {
+    let s = run(approvedState(), { type: 'planInput', field: 'business', value: 'A small studio' })
+    expect(s.status).toBe('approved')
+    expect(s.plan.inputs.business).toBe('A small studio')
+    const store = memoryStore()
+    saveState(store, s)
+    s = loadState(store, AT)
+    expect(s.plan.inputs.business).toBe('A small studio')
+  })
+
+  it('a scene edit returns to Draft at once and becomes the next plan version on commit', () => {
+    let s = run(imported(), attach(videoA), watched, approve)
+    expect(s.status).toBe('approved')
+    expect(s.approval?.planVersion).toBe(1)
+    s = reducer(s, { type: 'editScene', index: 1, field: 'narration', value: 'Two, revised.', at: AT })
+    expect(s.status).toBe('draft')
+    expect(s.approval).toBeNull()
+    expect(s.plan.version).toBe(1) // not committed yet
+    s = reducer(s, { type: 'commitPlan', at: AT })
+    expect(s.plan.version).toBe(2)
+    expect(s.activity.at(-1)?.text).toBe('Plan v2: edited scene 2')
+    expect(reducer(s, { type: 'commitPlan', at: AT })).toBe(s) // nothing further to commit
+  })
+
+  it('choosing another hook and scaling scenes are plan versions too', () => {
+    let s = reducer(imported(), { type: 'chooseHook', index: 2, at: AT })
+    expect(s.plan.version).toBe(2)
+    expect(s.activity.at(-1)?.text).toBe('Plan v2: hook 3 chosen')
+    s = reducer(s, { type: 'replaceScenes', scenes: s.plan.imported!.scenes.map((sc) => ({ ...sc, seconds: 5 })), reason: 'scene durations scaled to the voiceover (10s)', at: AT })
+    expect(s.plan.version).toBe(3)
+    expect(s.activity.at(-1)?.text).toBe('Plan v3: scene durations scaled to the voiceover (10s)')
+  })
+
+  it('replacing a plan withdraws approval', () => {
+    const s = reducer(run(imported(), attach(videoA), watched, approve), { type: 'importPlan', plan, at: AT })
+    expect(s.status).toBe('draft')
+    expect(s.plan.version).toBe(2)
+    expect(s.activity.map((e) => e.kind).slice(-2)).toEqual(['approval_withdrawn', 'plan_imported'])
+  })
+
+  it('a render from the plan is stale once the plan or the arrangement changes, and approval is blocked', () => {
+    let s = run(imported(), { type: 'setArrangement', fingerprint: 'fp-1' }, { type: 'attach', video: fromPlan(), at: AT, detail: 'from plan v1' }, watched)
+    expect(staleRenderReason(s)).toBeNull()
+    expect(approvalBlockers(s)).toEqual([])
+
+    const edited = run(s, { type: 'editScene', index: 0, field: 'seconds', value: 3, at: AT }, { type: 'commitPlan', at: AT })
+    expect(staleRenderReason(edited)).toMatch(/rendered from plan v1; the plan is now v2/)
+    expect(approvalBlockers(edited)).toEqual([expect.stringMatching(/Create the preview again/)])
+    expect(reducer(edited, approve).status).toBe('draft')
+
+    const rearranged = reducer(s, { type: 'setArrangement', fingerprint: 'fp-2' })
+    expect(staleRenderReason(rearranged)).toMatch(/assets or voiceover assigned to the scenes changed/)
+
+    // A fresh render from the current plan and arrangement clears it.
+    s = run(edited, { type: 'attach', video: { ...fromPlan('fp-1', 2), hash: 'sha256:eee' }, at: AT }, watched)
+    expect(staleRenderReason(s)).toBeNull()
+    expect(reducer(s, approve).status).toBe('approved')
+    expect(reducer(s, approve).activity.at(-1)?.text).toBe('Approved brief v1, plan v2 with video v2')
+  })
+
+  it('a manually attached file is never judged against the plan', () => {
+    const s = run(imported(), attach(videoA), watched, { type: 'editScene', index: 0, field: 'visual', value: 'x', at: AT }, { type: 'commitPlan', at: AT })
+    expect(staleRenderReason(s)).toBeNull()
+  })
+
+  it('old saved data without a plan loads with an empty plan', () => {
+    const store = memoryStore()
+    const legacy = JSON.parse(JSON.stringify(run(initialState(AT), edit('h')))) as Record<string, unknown>
+    delete legacy.plan
+    store.setItem(STORAGE_KEY, JSON.stringify(legacy))
+    const s = loadState(store, AT)
+    expect(s.plan.version).toBe(0)
+    expect(s.plan.imported).toBeNull()
+    expect(s.brief.hook).toBe('h')
   })
 })

@@ -10,7 +10,7 @@ One reel workspace: an editable brief, **Create a preview** (assemble a recorded
 - A video you attach plays from your device and is not copied anywhere.
 - When you create a preview, the voiceover and assets are sent to the **render service on this computer** (`server/index.mjs`, bound to `127.0.0.1:5174`), assembled with FFmpeg in a temporary job folder under the OS temp directory, loaded into the player, and the temporary files are then removed. Nothing goes to any external service.
 - Videos are not stored by the app. After a reload you must re-render or reattach the file and watch it to the end again before approving.
-- There is no login, no generation of ideas, scripts, voices or images, and no publishing.
+- There is no login and no publishing. The app does not generate ideas, scripts, voices or images: planning happens in your own Claude session via a copied prompt, and the app only validates the pasted result.
 
 ### Requirements
 
@@ -29,7 +29,17 @@ npm run dev        # starts the render service and the page; open http://localho
 
 `npm run dev` runs both processes. `npm run dev:web` runs only the page and `npm run render-service` only the service, if you want them in separate terminals.
 
-### Create a preview
+### Content plan
+
+1. Fill in the business description, audience, offer, topic, tone and call to action. These are saved in the browser.
+2. **Copy planning prompt** puts our prompt on the clipboard. It calls nothing: paste it into your own Claude session. The prompt asks for three hooks, one script and an ordered scene plan, and tells Claude to use only the supplied facts and to list anything else under `claimsToVerify`.
+3. Paste Claude's JSON reply and **Import plan**. The format is documented in `docs/content-plan-format.md`. Problems are listed with their paths and nothing is changed until the paste is valid; a valid paste over an existing plan asks first and becomes the next plan version.
+4. Edit the scene cards (narration, visual, seconds), choose a hook, and **Scale scenes** to your voiceover length if the suggested durations don't match it.
+5. Choose your recorded voiceover, add your images or clips, assign one to each scene, then **Create preview from plan**. The render goes through the same local service as the free-form panel and lands in the player as a new, unapproved video version.
+
+Every plan change (import, scene edit, hook choice, scaling) returns the reel to Draft and withdraws approval. A preview rendered from the plan remembers the plan version and the asset arrangement; if either changes afterwards, the player marks it out of date and approval is blocked until you create the preview again.
+
+### Create a preview (free-form)
 
 1. Choose your recorded voiceover (mp3, wav, m4a, …).
 2. Add images and/or video clips. They appear in order; move or remove them.
