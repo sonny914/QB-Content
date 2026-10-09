@@ -1,0 +1,79 @@
+{
+  "format": "qb-content-plan",
+  "version": 1,
+  "hooks": ["Morning. A resident reports a leak under the sink."],
+  "recommendedHook": 0,
+  "script": "Morning. A resident reports a leak under the sink. Day shift logs it, tries the easy fix, clocks out.",
+  "scenes": [
+    {
+      "narration": "Morning.",
+      "visual": "Oversized type on cream: MORNING. lands as it is spoken and holds.",
+      "seconds": 2.3,
+      "kind": "graphic",
+      "graphic": {
+        "template": "hero",
+        "theme": "light",
+        "label": "Property teams",
+        "headline": "Morning.",
+        "accent": "Morning.",
+        "land": 0.8
+      }
+    },
+    {
+      "narration": "A resident reports a leak under the sink.",
+      "visual": "A fictional maintenance-request app on a floating phone card (labelled as an illustration). The inbox is empty, then the leak request arrives with a NEW chip as the line is spoken.",
+      "seconds": 3.5,
+      "kind": "graphic",
+      "graphic": {
+        "template": "ticket",
+        "theme": "light",
+        "label": "Day shift",
+        "ticket": { "title": "Leak under the kitchen sink", "meta": "Unit 4B · Reported by resident", "time": "7:42 AM", "status": "Open", "shift": "Day shift", "app": "Requests" },
+        "events": [{ "type": "request", "at": 0.7, "time": "7:42 AM" }],
+        "captions": [{ "start": 0.35, "end": 2.9, "text": "A resident reports a leak under the sink.", "highlight": "leak" }]
+      }
+    },
+    {
+      "narration": "Day shift logs it,",
+      "visual": "Same ticket, carried on. Day shift's note types into the activity feed and the view pushes in on it.",
+      "seconds": 2.0,
+      "kind": "graphic",
+      "graphic": {
+        "template": "ticket",
+        "theme": "light",
+        "label": "Day shift",
+        "continues": true,
+        "ticket": { "title": "Leak under the kitchen sink", "meta": "Unit 4B · Reported by resident", "time": "7:42 AM", "status": "Open", "shift": "Day shift", "app": "Requests" },
+        "events": [
+          { "type": "request", "time": "7:42 AM" },
+          { "type": "note", "at": 0.45, "text": "Logged. Will check after rounds.", "by": "Day shift", "time": "7:51 AM" }
+        ],
+        "captions": [{ "start": 0.15, "end": 1.6, "text": "Day shift logs it,", "highlight": "logs" }]
+      }
+    },
+    {
+      "narration": "tries the easy fix, clocks out.",
+      "visual": "Same ticket. An action is recorded with a check mark; then the shift chip rolls to Night shift, the lights go out, and the request stays Open, pulsing.",
+      "seconds": 2.6,
+      "kind": "graphic",
+      "graphic": {
+        "template": "ticket",
+        "theme": "light",
+        "label": "Day shift",
+        "continues": true,
+        "ticket": { "title": "Leak under the kitchen sink", "meta": "Unit 4B · Reported by resident", "time": "7:42 AM", "status": "Open", "shift": "Day shift", "app": "Requests" },
+        "events": [
+          { "type": "request", "time": "7:42 AM" },
+          { "type": "note", "text": "Logged. Will check after rounds.", "by": "Day shift", "time": "7:51 AM" },
+          { "type": "action", "at": 0.25, "text": "Tightened the fitting. Still dripping.", "by": "Day shift", "time": "11:20 AM" },
+          { "type": "shift", "at": 1.1, "text": "Night shift", "time": "3:00 PM" }
+        ],
+        "captions": [
+          { "start": 0.15, "end": 1.05, "text": "tries the easy fix,", "highlight": "easy" },
+          { "start": 1.05, "end": 2.35, "text": "clocks out.", "highlight": "out." }
+        ]
+      }
+    }
+  ],
+  "claimsToVerify": []
+}

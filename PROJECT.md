@@ -3,7 +3,9 @@
 A platform for brand setup, content planning, video previews, revisions,
 approvals and, eventually, social publishing.
 
-Status: project setup only. No dependencies, screens or service connections yet.
+Status: local prototype. Done so far: the review loop (brief, preview, revision notes, approval,
+download) and local assembly of a recorded voiceover plus images/clips into an MP4 with FFmpeg.
+No service connections, no generation.
 
 ## First milestone: one QB reel, brief to download
 

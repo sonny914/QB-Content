@@ -1,0 +1,114 @@
+{
+  "format": "qb-content-plan",
+  "version": 1,
+  "hooks": [
+    "Morning. A resident reports a leak under the sink.",
+    "Your resident just explained the same problem twice today.",
+    "Day shift knew. Night shift did not. The resident paid for it."
+  ],
+  "recommendedHook": 0,
+  "script": "Morning. A resident reports a leak under the sink. Day shift logs it, tries the easy fix, clocks out. Evening. The resident calls back. Different person. \"Can you explain what happened?\" Nothing was lost. It was just sitting somewhere else. A useful handoff keeps four things together: the request, what was tried, who owns it, the next action. The next person picks it up mid-sentence. Where does your team lose the thread between shifts?",
+  "scenes": [
+    {
+      "narration": "Morning. A resident reports a leak under the sink.",
+      "visual": "Request card: a resident's morning request arrives.",
+      "seconds": 3.5,
+      "kind": "graphic",
+      "graphic": {
+        "template": "card",
+        "label": "Morning",
+        "headline": "A resident reports a leak.",
+        "items": [{ "label": "Request", "text": "Leak under the sink" }],
+        "emphasize": 0
+      }
+    },
+    {
+      "narration": "Day shift logs it, tries the easy fix, clocks out.",
+      "visual": "Day shift's card: logged, tried the easy fix, clocked out.",
+      "seconds": 4,
+      "kind": "graphic",
+      "graphic": {
+        "template": "card",
+        "label": "Day shift",
+        "headline": "Logged.",
+        "items": [
+          { "label": "Tried", "text": "The easy fix" },
+          { "label": "Then", "text": "Clocked out" }
+        ],
+        "emphasize": 1
+      }
+    },
+    {
+      "narration": "Evening. The resident calls back. Different person. \"Can you explain what happened?\"",
+      "visual": "Evening title: the resident's question to a different person.",
+      "seconds": 5,
+      "kind": "graphic",
+      "graphic": {
+        "template": "title",
+        "label": "Evening",
+        "headline": "\"Can you explain what happened?\"",
+        "support": "Different person. Same leak.",
+        "emphasize": "headline"
+      }
+    },
+    {
+      "narration": "Nothing was lost. It was just sitting somewhere else.",
+      "visual": "Four notes scattered across the frame; owner and next action unknown.",
+      "seconds": 3.5,
+      "kind": "graphic",
+      "graphic": {
+        "template": "notes",
+        "headline": "Nothing was lost.",
+        "support": "It was just sitting somewhere else.",
+        "items": [
+          { "label": "Request", "text": "Leak under the sink" },
+          { "label": "Tried", "text": "The easy fix" },
+          { "label": "Owner", "text": "Day shift" },
+          { "label": "Next", "text": "?" }
+        ]
+      }
+    },
+    {
+      "narration": "A useful handoff keeps four things together: the request, what was tried, who owns it, the next action.",
+      "visual": "The four notes gather into one handoff card; the next action lights up.",
+      "seconds": 7,
+      "kind": "graphic",
+      "graphic": {
+        "template": "notes",
+        "headline": "One handoff.",
+        "gather": true,
+        "items": [
+          { "label": "Request", "text": "Leak under the sink" },
+          { "label": "Tried", "text": "The easy fix" },
+          { "label": "Owner", "text": "Evening desk" },
+          { "label": "Next", "text": "Maintenance visit" }
+        ],
+        "emphasize": 3
+      }
+    },
+    {
+      "narration": "The next person picks it up mid-sentence.",
+      "visual": "Evening title: picked up mid-sentence.",
+      "seconds": 3.5,
+      "kind": "graphic",
+      "graphic": {
+        "template": "title",
+        "label": "Evening",
+        "headline": "Picked up mid-sentence.",
+        "support": "The resident says it once.",
+        "emphasize": "headline"
+      }
+    },
+    {
+      "narration": "Where does your team lose the thread between shifts?",
+      "visual": "Closing question on a plain card.",
+      "seconds": 3.5,
+      "kind": "graphic",
+      "graphic": {
+        "template": "question",
+        "headline": "Where does your team lose the thread between shifts?"
+      }
+    }
+  ],
+  "claimsToVerify": []
+}
