@@ -56,3 +56,7 @@ npm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+
+# Test output
+test-results/
+playwright-report/
