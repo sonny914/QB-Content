@@ -23,7 +23,9 @@ npm run dev        # then open http://localhost:5173
 - **Approve** needs a video attached in this session and watched through to the end.
 - **Request changes** needs a revision note.
 - Editing the brief or replacing the video withdraws any approval and returns the reel to Draft.
-- An approval records the exact brief version and video (by SHA-256 of the file). Reattaching the identical file keeps a valid approval. A different file does not.
+- An approval records the exact brief version and video (by SHA-256 of the file). Reloading or reattaching a file requires a fresh review and explicit approval; earlier approvals remain in history.
+- Without SHA-256 (for example plain HTTP on a phone), preview and notes still work, but approval requires HTTPS or localhost.
+- File checking blocks approval. Failed checks show an error; clearing the workspace discards pending checks.
 
 ### Checks
 

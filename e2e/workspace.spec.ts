@@ -106,10 +106,17 @@ test('after a reload the brief, notes and activity persist but the video must be
   await approveBtn(page).click()
   await expect(status(page)).toHaveText('Approved')
 
-  // A still-valid approval survives reload, but the video still has to be reattached to be seen.
+  // An approved workspace must be explicitly reviewed and approved again after reload.
   await page.reload()
-  await expect(status(page)).toHaveText('Approved')
+  await expect(status(page)).toHaveText('Draft')
   await expect(page.getByTestId('reattach-notice')).toBeVisible()
+  await expect(activity(page)).toContainText('Approved brief')
+  await attach(page, VIDEO_A)
+  await expect(approveBtn(page)).toBeDisabled()
+  await watchToEnd(page)
+  await expect(status(page)).toHaveText('Draft')
+  await approveBtn(page).click()
+  await expect(status(page)).toHaveText('Approved')
 })
 
 test('fictional sample brief is clearly labelled', async ({ page }) => {
@@ -124,4 +131,49 @@ test('fits the viewport without horizontal scrolling', async ({ page }, info) =>
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(0)
   await page.screenshot({ path: `test-results/screens/${info.project.name}.png`, fullPage: true })
+})
+
+test('SHA-256 unavailable permits preview and notes but blocks approval', async ({ page }) => {
+  await page.evaluate(() => Object.defineProperty(window.crypto, 'subtle', { value: undefined, configurable: true }))
+  await attach(page, VIDEO_A)
+  await watchToEnd(page)
+  await expect(approveBtn(page)).toBeDisabled()
+  await expect(page.getByTestId('blockers')).toContainText('HTTPS or localhost')
+  await page.getByLabel('Revision note').fill('Keep this note')
+  await page.getByRole('button', { name: 'Request changes' }).click()
+  await expect(activity(page)).toContainText('Keep this note')
+})
+
+test('file read failures show a recoverable error', async ({ page }) => {
+  await page.evaluate(() => {
+    File.prototype.arrayBuffer = async () => { throw new Error('Read failed') }
+  })
+  await page.getByTestId('video-input').setInputFiles(VIDEO_A)
+  await expect(page.getByRole('alert')).toContainText('Could not read or verify')
+  await expect(page.getByRole('button', { name: 'Choose video', exact: true })).toBeEnabled()
+  await expect(approveBtn(page)).toBeDisabled()
+})
+
+test('pending replacement blocks approval and cannot repopulate a cleared workspace', async ({ page }) => {
+  await attach(page, VIDEO_A)
+  await watchToEnd(page)
+  await page.evaluate(() => {
+    const original = File.prototype.arrayBuffer
+    File.prototype.arrayBuffer = function () {
+      return new Promise<ArrayBuffer>((resolve, reject) => {
+        Object.assign(window, { finishFileRead: () => original.call(this).then(resolve, reject) })
+      })
+    }
+  })
+  await page.getByTestId('video-input').setInputFiles(VIDEO_B)
+  await expect(page.getByRole('button', { name: 'Checking file…' })).toBeVisible()
+  await expect(approveBtn(page)).toBeDisabled()
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: 'Clear local data' }).click()
+  await page.evaluate(async () => {
+    await (window as unknown as { finishFileRead: () => Promise<void> }).finishFileRead()
+  })
+  await expect(page.getByTestId('player')).toHaveCount(0)
+  await expect(activity(page)).not.toContainText('reel-b')
+  await expect(status(page)).toHaveText('Draft')
 })

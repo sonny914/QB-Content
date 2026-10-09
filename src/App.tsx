@@ -48,6 +48,8 @@ export default function App() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const [playError, setPlayError] = useState(false)
+  const [fileError, setFileError] = useState('')
+  const fileCheckId = useRef(0)
   const fileInput = useRef<HTMLInputElement>(null)
   const noteInput = useRef<HTMLTextAreaElement>(null)
 
@@ -73,14 +75,21 @@ export default function App() {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    const checkId = ++fileCheckId.current
     setChecking(true)
+    setFileError('')
     try {
       const video = await identifyVideo(file)
+      if (checkId !== fileCheckId.current) return
       setPlayError(false)
       setVideoUrl(URL.createObjectURL(file))
       dispatch({ type: 'attach', video, at: now() })
+    } catch {
+      if (checkId === fileCheckId.current) {
+        setFileError('Could not read or verify this file. Choose it again or try another local video. The previous preview has not changed.')
+      }
     } finally {
-      setChecking(false)
+      if (checkId === fileCheckId.current) setChecking(false)
     }
   }
 
@@ -102,6 +111,9 @@ export default function App() {
 
   function onReset() {
     if (!window.confirm('Clear the brief, notes and activity stored in this browser? This cannot be undone.')) return
+    fileCheckId.current += 1
+    setChecking(false)
+    setFileError('')
     clearState(store)
     setNote('')
     setNoteError('')
@@ -191,6 +203,7 @@ export default function App() {
               />
             </div>
 
+            {fileError && <p className="error" role="alert">{fileError}</p>}
             {attached && videoUrl ? (
               <>
                 <video
@@ -266,14 +279,14 @@ export default function App() {
                 type="button"
                 className="btn btn-accent"
                 onClick={() => dispatch({ type: 'approve', at: now() })}
-                disabled={blockers.length > 0 || playError}
+                disabled={checking || blockers.length > 0 || playError}
                 aria-describedby="approve-blockers"
               >
                 Approve
               </button>
             </div>
             <ul className="blockers" id="approve-blockers" data-testid="blockers">
-              {(playError ? ['The preview must be playable.'] : blockers).map((b) => (
+              {(checking ? ['Checking the replacement file…'] : playError ? ['The preview must be playable.'] : blockers).map((b) => (
                 <li key={b}>{b}</li>
               ))}
             </ul>

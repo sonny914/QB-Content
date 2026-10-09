@@ -78,10 +78,10 @@ describe('approval rules', () => {
     expect(s.activity.map((e) => e.kind).slice(-2)).toEqual(['video_replaced', 'approval_withdrawn'])
   })
 
-  it('reattaching the identical file keeps the approval', () => {
+  it('reattaching the identical file requires a fresh review', () => {
     const s = reducer(approvedState(), attach(videoA))
-    expect(s.status).toBe('approved')
-    expect(isApprovalCurrent(s)).toBe(true)
+    expect(s.status).toBe('draft')
+    expect(isApprovalCurrent(s)).toBe(false)
   })
 
   it('a no-op edit does not withdraw approval', () => {
@@ -160,3 +160,38 @@ describe('local persistence', () => {
 function currentVersion(s: State) {
   return s.videos.find((v) => v.hash === s.currentVideoHash)?.version
 }
+
+describe('approval reliability regressions', () => {
+  it('reload clears current approval but retains history until explicit reapproval', () => {
+    const store = memoryStore()
+    saveState(store, approvedState())
+    let s = loadState(store, AT)
+    expect(s.status).toBe('draft')
+    expect(s.approval).toBeNull()
+    expect(s.activity.some(e => e.kind === 'approved')).toBe(true)
+    s = run(s, attach(videoA), approve)
+    expect(s.status).toBe('draft')
+    s = run(s, watched)
+    expect(s.status).toBe('draft')
+    s = run(s, approve)
+    expect(isApprovalCurrent(s)).toBe(true)
+    expect(s.activity.filter(e => e.kind === 'approved')).toHaveLength(2)
+  })
+
+  it('metadata-only files cannot be approved, even after watching', () => {
+    const weak = { ...videoA, hash: 'fp:same:100:0', hashKind: 'fingerprint' as const }
+    const s = run(initialState(AT), { type: 'attach', video: weak, at: AT }, watched, approve)
+    expect(s.approval).toBeNull()
+    expect(approvalBlockers(s)[0]).toContain('SHA-256')
+  })
+
+  it('legacy fingerprint approval cannot survive reload or reattachment', () => {
+    const store = memoryStore()
+    const legacy = approvedState()
+    legacy.videos[0] = { ...legacy.videos[0], hashKind: 'fingerprint' }
+    saveState(store, legacy)
+    const s = run(loadState(store, AT), { type: 'attach', video: legacy.videos[0], at: AT }, watched, approve)
+    expect(isApprovalCurrent(s)).toBe(false)
+    expect(s.status).toBe('draft')
+  })
+})

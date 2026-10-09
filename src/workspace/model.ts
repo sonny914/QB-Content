@@ -110,7 +110,13 @@ export function initialState(at: string): State {
 }
 
 export function fromPersisted(p: PersistedState): State {
-  return { ...p, session: { attached: null, watched: false } }
+  // Historical approvals remain in activity; each page load needs explicit review.
+  return {
+    ...p,
+    status: p.status === 'approved' ? 'draft' : p.status,
+    approval: null,
+    session: { attached: null, watched: false },
+  }
 }
 
 export function toPersisted(s: State): PersistedState {
@@ -129,6 +135,9 @@ export function isApprovalCurrent(s: State): boolean {
   return (
     s.status === 'approved' &&
     s.approval !== null &&
+    s.session.attached?.hashKind === 'sha256' &&
+    s.session.attached.hash === s.currentVideoHash &&
+    s.session.watched &&
     s.approval.briefSnapshot === snapshot(s.brief) &&
     s.approval.videoHash === s.currentVideoHash
   )
@@ -144,6 +153,8 @@ export function approvalBlockers(s: State): string[] {
         ? 'Reattach the video. Files are not kept between sessions.'
         : 'Attach the reel video.',
     )
+  } else if (s.session.attached.hashKind !== 'sha256') {
+    reasons.push('Approval requires SHA-256 verification. Open this app over HTTPS or localhost and reattach the video.')
   } else if (!s.session.watched) {
     reasons.push('Watch the preview through to the end.')
   }
@@ -219,6 +230,7 @@ export function reducer(s: State, a: Action): State {
       if (prevHash === null) {
         next = log(next, a.at, 'video_attached', `Video v${version.version} attached: ${version.name}`)
       } else if (prevHash === version.hash) {
+        next = backToDraft(next, a.at, 'video reattached for fresh review')
         next = log(next, a.at, 'video_reattached', `Video v${version.version} attached again for review: ${version.name}`)
       } else {
         const prev = s.videos.find((v) => v.hash === prevHash)
