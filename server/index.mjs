@@ -6,6 +6,7 @@ import { createReadStream, createWriteStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { checkTools } from './ffmpeg.mjs'
 import { JobStore } from './jobs.mjs'
 import { MAX_ASSETS, resolveFormat } from './render.mjs'
@@ -192,7 +193,8 @@ export async function startServer({ port = PORT, host = HOST, baseDir, format = 
   return { server, store, tools, close, address: server.address() }
 }
 
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === new URL(import.meta.url).pathname
+// Windows paths need fileURLToPath here: a raw URL pathname (/C:/...) never equals argv[1] (C:\...).
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (isMain) {
   startServer().then(({ tools, address, close, store }) => {
     console.log(`QB render service on http://${address.address}:${address.port} (localhost only)`)
