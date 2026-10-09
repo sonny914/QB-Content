@@ -15,6 +15,8 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@expo-google-fonts/inter": "^0.4.2",
+    "@napi-rs/canvas": "^1.0.10",
     "busboy": "^1.6.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"

@@ -169,3 +169,11 @@ a.btn-outline:hover { background: var(--cream-faint); }
 select { font: inherit; color: var(--cream); background: var(--black); border: 1px solid var(--cream-line); border-radius: 8px; padding: 8px 10px; max-width: 100%; }
 select:disabled { opacity: 0.5; }
 p.warn { margin: 10px 0 0; }
+
+/* Motion graphic editor */
+.choice { display: inline-flex; align-items: center; gap: 8px; font-size: 0.875rem; padding: 6px 0; }
+.choice input { accent-color: var(--orange); }
+.graphic-editor { display: grid; gap: 10px; padding: 12px; border: 1px dashed var(--cream-line); border-radius: 8px; }
+.graphic-editor .grow { flex: 1 1 200px; }
+.item-row { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(120px, 2fr) auto; gap: 8px; align-items: center; }
+.item-row input { min-width: 0; }

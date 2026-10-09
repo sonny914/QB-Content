@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EMPTY_PLAN_INPUTS, extractJson, parsePlan, planSnapshot, scaleScenes, totalSeconds, type ContentPlan } from './plan'
+import { EMPTY_GRAPHIC, EMPTY_PLAN_INPUTS, extractJson, graphicReadingSeconds, parsePlan, planSnapshot, scaleScenes, totalSeconds, type ContentPlan } from './plan'
 import { buildPlanningPrompt } from './planPrompt'
 
 const valid = {
@@ -108,6 +108,46 @@ describe('parsePlan', () => {
       'The scenes add up to 100s; short reels usually run 20–45s.',
       'The script contains [bracketed placeholders] but "claimsToVerify" is empty. Check what still needs filling in.',
     ])
+  })
+})
+
+describe('graphic scenes', () => {
+  const graphicScene = {
+    narration: 'Day shift logs it.',
+    visual: 'Request card',
+    seconds: 4,
+    kind: 'graphic',
+    graphic: { template: 'card', label: 'Day shift', headline: 'Logged.', items: [{ label: 'Tried', text: 'The easy fix' }], emphasize: 0 },
+  }
+
+  it('imports graphic scenes and keeps asset scenes as the default', () => {
+    const r = parsePlan(JSON.stringify({ ...valid, scenes: [valid.scenes[0], graphicScene] }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.plan.scenes[0]).toMatchObject({ kind: 'asset', graphic: null })
+    expect(r.plan.scenes[1]).toMatchObject({ kind: 'graphic', graphic: { template: 'card', headline: 'Logged.', gather: false, emphasize: 0 } })
+    // A graphic object without kind also counts as a graphic scene.
+    const implicit = parsePlan(JSON.stringify({ ...valid, scenes: [{ ...graphicScene, kind: undefined }] }))
+    expect(implicit.ok && implicit.plan.scenes[0].kind).toBe('graphic')
+  })
+
+  it('lists graphic problems with their paths and warns when there is too much to read', () => {
+    const r = parsePlan(JSON.stringify({ ...valid, scenes: [{ ...graphicScene, graphic: { template: 'poster', headline: '', items: [{ label: 'x' }], emphasize: 5 } }, { ...graphicScene, kind: 'photo' }] }))
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.errors).toEqual([
+      'scenes[0].graphic.template must be one of title, card, notes, question (got "poster").',
+      'scenes[0].graphic.headline is required.',
+      'scenes[0].graphic.items[0].text is required.',
+      'scenes[0].graphic.emphasize must be "headline" or an item index 0 to 0 (got 5).',
+      'scenes[1].kind must be "asset" or "graphic" (got "photo").',
+    ])
+    const slow = parsePlan(JSON.stringify({ ...valid, scenes: [{ ...graphicScene, seconds: 1 }] }))
+    expect(slow.ok && slow.warnings[0]).toMatch(/needs about [\d.]+s to read but the scene is 1s/)
+  })
+
+  it('reading time counts every word on screen', () => {
+    expect(graphicReadingSeconds({ ...EMPTY_GRAPHIC, headline: 'one two three', items: [{ label: 'a', text: 'b c' }] })).toBe(3.2)
   })
 })
 

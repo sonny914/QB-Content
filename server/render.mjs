@@ -1,6 +1,8 @@
-// Assembles a vertical 720x1280 MP4 from ordered visual assets plus one voiceover track.
-// Simple assembly: each asset is shown for its assigned seconds. No speech alignment.
+// Assembles a vertical 720x1280 MP4 from an ordered timeline of visual sources (uploaded images or
+// clips, or motion-graphic scenes drawn locally) plus one voiceover track, or silence when none is
+// attached. Simple assembly: each entry is shown for its assigned seconds. No speech alignment.
 import { FFMPEG, probe, run } from './ffmpeg.mjs'
+import { readingSeconds, renderGraphicClip, validateGraphic } from './graphics.mjs'
 
 export const WIDTH = 720
 export const HEIGHT = 1280
@@ -55,35 +57,75 @@ export function validateDurations(durations, assetCount) {
   return clean
 }
 
-/** Probe every input and work out what the render will do. Pure planning: no rendering here. */
-export async function plan({ voiceover, assets, durations }) {
-  const voice = await probe(voiceover.path).catch((err) => {
-    throw new Error(`The voiceover can't be read: ${err.message}`)
+/**
+ * Validate a structured timeline: [{ seconds, source: 'asset' }, { seconds, source: 'graphic', graphic }].
+ * Asset entries consume the uploaded assets in order. Throws with a user-facing message.
+ */
+export function validateTimeline(timeline, assetCount) {
+  if (!Array.isArray(timeline) || timeline.length === 0) throw new Error('The timeline needs at least one scene')
+  if (timeline.length > MAX_ASSETS) throw new Error(`At most ${MAX_ASSETS} scenes per render`)
+  let assetIndex = 0
+  const clean = timeline.map((entry, i) => {
+    if (!entry || typeof entry !== 'object') throw new Error(`Scene ${i + 1} is not an object`)
+    const n = Number(entry.seconds)
+    if (!Number.isFinite(n)) throw new Error(`Scene ${i + 1} has no duration`)
+    if (n < MIN_SECONDS || n > MAX_SECONDS) throw new Error(`Scene ${i + 1} must be between ${MIN_SECONDS} and ${MAX_SECONDS} seconds`)
+    const seconds = round(n)
+    if (entry.source === 'graphic') return { seconds, source: 'graphic', graphic: validateGraphic(entry.graphic, `Scene ${i + 1} graphic`) }
+    if (entry.source === 'asset' || entry.source === undefined) {
+      if (assetIndex >= assetCount) throw new Error(`Scene ${i + 1} needs an uploaded asset but only ${assetCount} ${assetCount === 1 ? 'was' : 'were'} sent`)
+      return { seconds, source: 'asset', assetIndex: assetIndex++ }
+    }
+    throw new Error(`Scene ${i + 1} has an unknown source "${entry.source}"`)
   })
-  if (!voice.hasAudio) throw new Error('The voiceover file has no audio track')
+  if (assetIndex !== assetCount) throw new Error(`${assetCount} asset${assetCount === 1 ? '' : 's'} sent but the timeline uses ${assetIndex}`)
+  const total = clean.reduce((a, e) => a + e.seconds, 0)
+  if (total > MAX_TOTAL_SECONDS) throw new Error(`Total timeline must be ${MAX_TOTAL_SECONDS} seconds or less`)
+  return clean
+}
+
+/** Probe every input and work out what the render will do. Pure planning: no rendering here. */
+export async function plan({ voiceover, assets, timeline, jobDir }) {
+  let voiceDuration = 0
+  if (voiceover) {
+    const voice = await probe(voiceover.path).catch((err) => {
+      throw new Error(`The voiceover can't be read: ${err.message}`)
+    })
+    if (!voice.hasAudio) throw new Error('The voiceover file has no audio track')
+    voiceDuration = round(voice.duration)
+  }
 
   const items = []
   const notes = []
-  for (const [i, asset] of assets.entries()) {
+  for (const [i, entry] of timeline.entries()) {
+    const seconds = entry.seconds
+    if (entry.source === 'graphic') {
+      const need = readingSeconds(entry.graphic)
+      if (seconds < need - 0.05) notes.push(`Scene ${i + 1} shows ${entry.graphic.headline ? 'text' : 'a graphic'} that needs about ${need}s to read but is set to ${seconds}s.`)
+      items.push({ index: i, name: `graphic: ${entry.graphic.headline}`, path: `${jobDir}/graphic-${i}.mp4`, kind: 'video', seconds, sourceDuration: seconds, hold: 0, graphic: entry.graphic })
+      continue
+    }
+    const asset = assets[entry.assetIndex]
     const info = await probe(asset.path).catch((err) => {
-      throw new Error(`Asset ${i + 1} (${asset.name}) can't be read: ${err.message}`)
+      throw new Error(`Scene ${i + 1} (${asset.name}) can't be read: ${err.message}`)
     })
-    if (info.kind === 'audio') throw new Error(`Asset ${i + 1} (${asset.name}) is audio only. Visual assets must be images or video clips`)
-    const seconds = durations[i]
+    if (info.kind === 'audio') throw new Error(`Scene ${i + 1} (${asset.name}) is audio only. Visual assets must be images or video clips`)
     const item = { index: i, name: asset.name, path: asset.path, kind: info.kind, seconds, sourceDuration: round(info.duration), hold: 0 }
     if (info.kind === 'video' && info.duration > 0 && info.duration < seconds - 0.05) {
       item.hold = round(seconds - info.duration)
-      notes.push(`Clip ${i + 1} (${asset.name}) is ${item.sourceDuration}s but set to ${seconds}s, so its last frame holds for ${item.hold}s.`)
+      notes.push(`Clip in scene ${i + 1} (${asset.name}) is ${item.sourceDuration}s but set to ${seconds}s, so its last frame holds for ${item.hold}s.`)
     }
     items.push(item)
   }
 
-  const total = round(durations.reduce((a, b) => a + b, 0))
-  const voiceDuration = round(voice.duration)
-  if (total < voiceDuration - 0.05) notes.push(`The timeline (${total}s) is shorter than the voiceover (${voiceDuration}s): the narration is cut off at ${total}s.`)
-  if (total > voiceDuration + 0.05) notes.push(`The timeline (${total}s) is longer than the voiceover (${voiceDuration}s): the last ${round(total - voiceDuration)}s is silent.`)
+  const total = round(timeline.reduce((a, e) => a + e.seconds, 0))
+  if (!voiceover) notes.push('Silent preview: no voiceover was attached, so the audio track is silence.')
+  else {
+    if (total < voiceDuration - 0.05) notes.push(`The timeline (${total}s) is shorter than the voiceover (${voiceDuration}s): the narration is cut off at ${total}s.`)
+    if (total > voiceDuration + 0.05) notes.push(`The timeline (${total}s) is longer than the voiceover (${voiceDuration}s): the last ${round(total - voiceDuration)}s is silent.`)
+  }
 
-  return { items, total, voiceDuration, notes }
+  return { items, total, voiceDuration, notes, silent: !voiceover, graphicCount: items.filter((it) => it.graphic).length }
 }
 
 /** Build the ffmpeg argument list. Exported so tests can check it without rendering. */
@@ -108,7 +150,9 @@ export function buildArgs({ items, total, voiceover, output, format = resolveFor
     }
   }
   const voiceIndex = items.length
-  args.push('-i', voiceover)
+  // No voiceover: a silent track keeps the output a normal video with audio, clearly labelled silent.
+  if (voiceover) args.push('-i', voiceover)
+  else args.push('-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=mono')
   const chain = items.map((it) => `[v${it.index}]`).join('')
   filters.push(`${chain}concat=n=${items.length}:v=1:a=0[vout]`)
   // Voiceover only: source clip audio is never mapped, so it can't compete with the narration.
@@ -125,14 +169,31 @@ export function buildArgs({ items, total, voiceover, output, format = resolveFor
   return args
 }
 
-/** Render to `output`, reporting 0..1 progress. */
-export async function render({ items, total, voiceover, output, format, onProgress, signal }) {
+/** Render to `output`, reporting 0..1 progress. Graphic scenes are drawn to clips first. */
+export async function render({ items, total, voiceover, output, format, onProgress, onStage, signal }) {
+  const graphics = items.filter((it) => it.graphic)
+  // Drawing frames is the slower half when graphics are present; weight progress accordingly.
+  const drawShare = graphics.length ? 0.55 : 0
+  const graphicSeconds = graphics.reduce((a, it) => a + it.seconds, 0)
+  let drawn = 0
+  for (const [n, item] of graphics.entries()) {
+    if (onStage) onStage(`Drawing graphic scene ${item.index + 1} (${n + 1} of ${graphics.length})`)
+    await renderGraphicClip({
+      spec: item.graphic,
+      seconds: item.seconds,
+      output: item.path,
+      signal,
+      onProgress: (p) => onProgress && onProgress(((drawn + p * item.seconds) / graphicSeconds) * drawShare),
+    })
+    drawn += item.seconds
+  }
+  if (onStage) onStage(graphics.length ? 'Assembling the scenes with the audio' : null)
   const args = buildArgs({ items, total, voiceover, output, format })
   await run(FFMPEG, args, {
     signal,
     onStdoutLine: (line) => {
       const m = /^out_time_us=(\d+)/.exec(line)
-      if (m && onProgress) onProgress(Math.min(1, Number(m[1]) / 1e6 / total))
+      if (m && onProgress) onProgress(drawShare + Math.min(1, Number(m[1]) / 1e6 / total) * (1 - drawShare))
     },
   })
   const info = await probe(output)

@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { plan, render, resolveFormat, validateDurations } from './render.mjs'
+import { plan, render, resolveFormat, validateDurations, validateTimeline } from './render.mjs'
 
 export const JOB_ID = /^[a-f0-9]{24}$/
 const JOB_TTL_MS = 2 * 60 * 60 * 1000 // outputs are kept for two hours, then removed
@@ -66,23 +66,31 @@ export class JobStore {
   }
 
   /** Validate, plan and render in the background. The job object is updated as it goes. */
-  async start(job, { voiceover, assets, durations }) {
+  async start(job, { voiceover, assets, durations, timeline }) {
     try {
       job.status = 'checking'
       job.message = 'Checking files'
-      const clean = validateDurations(durations, assets.length)
-      const p = await plan({ voiceover, assets, durations: clean })
+      // Legacy clients send plain durations for uploaded assets; newer ones send a structured timeline.
+      const clean = timeline
+        ? validateTimeline(timeline, assets.length)
+        : validateDurations(durations, assets.length).map((seconds) => ({ seconds, source: 'asset' }))
+      const resolved = clean.map((e, i) => (e.source === 'asset' && e.assetIndex === undefined ? { ...e, assetIndex: i } : e))
+      const p = await plan({ voiceover, assets, timeline: resolved, jobDir: job.dir })
       job.notes = p.notes
       job.status = 'rendering'
-      job.message = `Rendering ${p.items.length} asset${p.items.length === 1 ? '' : 's'} with the voiceover`
+      const baseMessage = `Rendering ${p.items.length} scene${p.items.length === 1 ? '' : 's'} ${voiceover ? 'with the voiceover' : 'as a silent preview'}`
+      job.message = baseMessage
       const output = this.outputPath(job)
       const result = await render({
         items: p.items,
         total: p.total,
-        voiceover: voiceover.path,
+        voiceover: voiceover ? voiceover.path : null,
         output,
         format: this.format,
         signal: job.controller.signal,
+        onStage: (stage) => {
+          job.message = stage ? `${baseMessage}: ${stage}` : baseMessage
+        },
         onProgress: (fraction) => {
           job.progress = fraction
         },
@@ -96,12 +104,15 @@ export class JobStore {
         timeline: p.total,
         voiceDuration: p.voiceDuration,
         assetCount: p.items.length,
+        graphicCount: p.graphicCount,
+        silent: p.silent,
       }
       job.progress = 1
       job.status = 'done'
       job.message = 'Preview ready'
       // The uploaded sources are no longer needed; keep only the rendered file.
-      await Promise.all([voiceover, ...assets].map((f) => rm(f.path, { force: true })))
+      await Promise.all([voiceover, ...assets].filter(Boolean).map((f) => rm(f.path, { force: true })))
+      await Promise.all(p.items.filter((it) => it.graphic).map((it) => rm(it.path, { force: true })))
     } catch (err) {
       job.status = 'failed'
       job.error = err.message

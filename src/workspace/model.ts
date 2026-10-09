@@ -1,6 +1,6 @@
 // Single-reel review workflow: brief, content plan, video versions, revision requests and approval.
 // Pure state + reducer so the approval rules can be tested without a browser.
-import { EMPTY_PLAN_INPUTS, planSnapshot, planSummary, type ContentPlan, type PlanInputField, type PlanInputs, type PlanScene } from './plan'
+import { EMPTY_PLAN_INPUTS, normaliseScene, planSnapshot, planSummary, type ContentPlan, type GraphicSpec, type PlanInputField, type PlanInputs, type PlanScene } from './plan'
 
 export type BriefField = 'title' | 'audience' | 'objective' | 'hook' | 'script' | 'cta'
 export type Brief = Record<BriefField, string>
@@ -29,6 +29,8 @@ export interface VideoVersion {
   origin?: 'attached' | 'rendered'
   /** Set when the render came from the content plan: which plan version and which arrangement of files. */
   renderSource?: RenderSource
+  /** True when the render had no voiceover: a silent preview. */
+  silent?: boolean
 }
 
 export interface RenderSource {
@@ -120,6 +122,8 @@ export type Action =
   | { type: 'planInput'; field: PlanInputField; value: string }
   | { type: 'importPlan'; plan: ContentPlan; at: string }
   | { type: 'editScene'; index: number; field: 'narration' | 'visual' | 'seconds'; value: string | number; at: string }
+  | { type: 'editScene'; index: number; field: 'kind'; value: 'asset' | 'graphic'; at: string }
+  | { type: 'editScene'; index: number; field: 'graphic'; value: GraphicSpec; at: string }
   | { type: 'replaceScenes'; scenes: PlanScene[]; reason: string; at: string }
   | { type: 'chooseHook'; index: number; at: string }
   | { type: 'commitPlan'; at: string }
@@ -149,9 +153,12 @@ export function initialState(at: string): State {
 
 export function fromPersisted(p: PersistedState): State {
   // Historical approvals remain in activity; each page load needs explicit review.
+  const plan = p.plan ?? { ...EMPTY_PLAN_STATE, inputs: { ...EMPTY_PLAN_INPUTS } }
+  // Plans saved before graphic scenes existed get the asset default; the snapshot stays as committed.
+  const imported = plan.imported ? { ...plan.imported, scenes: plan.imported.scenes.map(normaliseScene) } : null
   return {
     ...p,
-    plan: p.plan ?? { ...EMPTY_PLAN_STATE, inputs: { ...EMPTY_PLAN_INPUTS } },
+    plan: { ...plan, imported, committedSnapshot: imported ? planSnapshot(imported) : plan.committedSnapshot },
     status: p.status === 'approved' ? 'draft' : p.status,
     approval: null,
     session: { attached: null, watched: false, arrangementFingerprint: null },
@@ -271,7 +278,7 @@ function commitPlan(s: State, at: string, detail: string): State {
 function changedScenes(s: State): string {
   const plan = s.plan.imported
   if (!plan || !s.plan.committedSnapshot) return 'edited'
-  let committed: [string[], number, string, [string, string, number][], string[]]
+  let committed: [string[], number, string, unknown[][], string[]]
   try {
     committed = JSON.parse(s.plan.committedSnapshot)
   } catch {
@@ -280,7 +287,7 @@ function changedScenes(s: State): string {
   const parts: string[] = []
   const scenesBefore = committed[3] ?? []
   const nums = plan.scenes
-    .map((sc, i) => (scenesBefore[i] && scenesBefore[i][0] === sc.narration && scenesBefore[i][1] === sc.visual && scenesBefore[i][2] === sc.seconds ? null : i + 1))
+    .map((sc, i) => (scenesBefore[i] && JSON.stringify(scenesBefore[i]) === JSON.stringify([sc.narration, sc.visual, sc.seconds, sc.kind, sc.kind === 'graphic' ? sc.graphic : null]) ? null : i + 1))
     .filter((n): n is number => n !== null)
   if (nums.length) parts.push(`edited scene${nums.length === 1 ? '' : 's'} ${nums.join(', ')}`)
   if (committed[1] !== plan.recommendedHook) parts.push(`hook ${plan.recommendedHook + 1} chosen`)
@@ -305,9 +312,14 @@ export function reducer(s: State, a: Action): State {
       const plan = s.plan.imported
       if (!plan || !plan.scenes[a.index]) return s
       const scene = plan.scenes[a.index]
-      const value = a.field === 'seconds' ? Math.round(Number(a.value) * 10) / 10 : String(a.value)
-      if (scene[a.field] === value) return s
-      const scenes = plan.scenes.map((sc, i) => (i === a.index ? { ...sc, [a.field]: value } : sc))
+      let patch: Partial<PlanScene>
+      if (a.field === 'seconds') patch = { seconds: Math.round(Number(a.value) * 10) / 10 }
+      else if (a.field === 'graphic') patch = { graphic: a.value, kind: 'graphic' }
+      else if (a.field === 'kind') patch = { kind: a.value }
+      else patch = { [a.field]: String(a.value) }
+      const changed = (Object.keys(patch) as (keyof PlanScene)[]).some((k) => JSON.stringify(scene[k]) !== JSON.stringify(patch[k]))
+      if (!changed) return s
+      const scenes = plan.scenes.map((sc, i) => (i === a.index ? { ...sc, ...patch } : sc))
       const next = { ...s, plan: { ...s.plan, imported: { ...plan, scenes } } }
       return backToDraft(next, a.at, 'plan edited')
     }

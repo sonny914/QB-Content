@@ -16,6 +16,7 @@ One reel workspace: an editable brief, **Create a preview** (assemble a recorded
 
 - Node.js 20 or newer.
 - **FFmpeg** (with `ffprobe`, `libx264` and AAC) on your PATH. The app reports what's missing on the Create a preview panel.
+- Motion graphics are drawn with `@napi-rs/canvas` (prebuilt binaries, installed by `npm install`) and the Inter typeface from `@expo-google-fonts/inter` (SIL Open Font License, see that package's `LICENSE_FONT`).
   - Windows: `winget install Gyan.FFmpeg`, then open a new terminal.
   - macOS: `brew install ffmpeg`
   - Debian/Ubuntu: `sudo apt install ffmpeg`
@@ -36,6 +37,10 @@ npm run dev        # starts the render service and the page; open http://localho
 3. Paste Claude's JSON reply and **Import plan**. The format is documented in `docs/content-plan-format.md`. Problems are listed with their paths and nothing is changed until the paste is valid; a valid paste over an existing plan asks first and becomes the next plan version.
 4. Edit the scene cards (narration, visual, seconds), choose a hook, and **Scale scenes** to your voiceover length if the suggested durations don't match it.
 5. Choose your recorded voiceover, add your images or clips, assign one to each scene, then **Create preview from plan**. The render goes through the same local service as the free-form panel and lands in the player as a new, unapproved video version.
+
+**Motion-graphic scenes.** A scene can be a motion graphic instead of an uploaded file: switch a scene card to **Motion graphic** and fill in the structured fields (template, label, headline, support, up to four labelled items, emphasis), or import a plan that carries `graphic` objects (`docs/content-plan-format.md`; `docs/examples/handoff-reel-plan.json` is a complete example). The renderer draws these itself in QB's black, cream and orange with fixed entrance and emphasis motion; it does not interpret free-text visual descriptions. Scenes with more words than their seconds allow are flagged.
+
+**Silent preview.** If no voiceover is chosen, **Create silent preview** renders the timeline with a silent audio track and labels the result as silent in the player and the activity. With a voiceover, the recording is included as-is; scene timing is not aligned to speech automatically.
 
 Every plan change (import, scene edit, hook choice, scaling) returns the reel to Draft and withdraws approval. A preview rendered from the plan remembers the plan version and the asset arrangement; if either changes afterwards, the player marks it out of date and approval is blocked until you create the preview again.
 

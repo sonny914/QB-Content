@@ -23,11 +23,94 @@ export const PLAN_INPUT_FIELDS: { key: PlanInputField; label: string; multiline:
 
 export const EMPTY_PLAN_INPUTS: PlanInputs = { business: '', audience: '', offer: '', topic: '', tone: '', cta: '' }
 
+export const GRAPHIC_TEMPLATES = ['title', 'card', 'notes', 'question'] as const
+export type GraphicTemplate = (typeof GRAPHIC_TEMPLATES)[number]
+export const GRAPHIC_LIMITS = { headline: 90, support: 160, label: 24, items: 4, itemLabel: 20, itemText: 60 }
+
+export interface GraphicItem {
+  label: string
+  text: string
+}
+
+/** A motion-graphic scene the local renderer draws itself. Only these properties are understood. */
+export interface GraphicSpec {
+  template: GraphicTemplate
+  headline: string
+  support: string
+  label: string
+  items: GraphicItem[]
+  emphasize: 'headline' | number | null
+  gather: boolean
+}
+
 export interface PlanScene {
   id: string
   narration: string
   visual: string
   seconds: number
+  /** 'asset': an uploaded image or clip is assigned at render time. 'graphic': drawn from `graphic`. */
+  kind: 'asset' | 'graphic'
+  graphic: GraphicSpec | null
+}
+
+export const EMPTY_GRAPHIC: GraphicSpec = { template: 'title', headline: '', support: '', label: '', items: [], emphasize: null, gather: false }
+
+/** Validate a graphic spec, collecting every problem. Mirrors server/graphics.mjs. */
+export function validateGraphic(raw: unknown, where: string): { ok: true; spec: GraphicSpec } | { ok: false; errors: string[] } {
+  const errors: string[] = []
+  if (!isRecord(raw)) return { ok: false, errors: [`${where} must be an object with template, headline and optional items.`] }
+  const s = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
+  const templateRaw = raw.template === undefined ? 'title' : raw.template
+  const template = (GRAPHIC_TEMPLATES as readonly string[]).includes(templateRaw as string) ? (templateRaw as GraphicTemplate) : null
+  if (!template) errors.push(`${where}.template must be one of ${GRAPHIC_TEMPLATES.join(', ')} (got ${show(raw.template)}).`)
+  const headline = s(raw.headline)
+  if (!headline) errors.push(`${where}.headline is required.`)
+  else if (headline.length > GRAPHIC_LIMITS.headline) errors.push(`${where}.headline must be ${GRAPHIC_LIMITS.headline} characters or fewer (got ${headline.length}).`)
+  const support = s(raw.support)
+  if (support.length > GRAPHIC_LIMITS.support) errors.push(`${where}.support must be ${GRAPHIC_LIMITS.support} characters or fewer.`)
+  const label = s(raw.label)
+  if (label.length > GRAPHIC_LIMITS.label) errors.push(`${where}.label must be ${GRAPHIC_LIMITS.label} characters or fewer.`)
+  const items: GraphicItem[] = []
+  if (raw.items !== undefined && raw.items !== null) {
+    if (!Array.isArray(raw.items)) errors.push(`${where}.items must be an array.`)
+    else {
+      if (raw.items.length > GRAPHIC_LIMITS.items) errors.push(`${where}.items can hold at most ${GRAPHIC_LIMITS.items} items.`)
+      raw.items.forEach((it, i) => {
+        if (!isRecord(it)) {
+          errors.push(`${where}.items[${i}] must be an object with label and text.`)
+          return
+        }
+        const l = s(it.label)
+        const t = s(it.text)
+        if (!t) errors.push(`${where}.items[${i}].text is required.`)
+        if (l.length > GRAPHIC_LIMITS.itemLabel) errors.push(`${where}.items[${i}].label must be ${GRAPHIC_LIMITS.itemLabel} characters or fewer.`)
+        if (t.length > GRAPHIC_LIMITS.itemText) errors.push(`${where}.items[${i}].text must be ${GRAPHIC_LIMITS.itemText} characters or fewer.`)
+        items.push({ label: l, text: t })
+      })
+    }
+  }
+  let emphasize: GraphicSpec['emphasize'] = null
+  if (raw.emphasize !== undefined && raw.emphasize !== null && raw.emphasize !== '') {
+    if (raw.emphasize === 'headline') emphasize = 'headline'
+    else if (Number.isInteger(raw.emphasize) && (raw.emphasize as number) >= 0 && (raw.emphasize as number) < items.length) emphasize = raw.emphasize as number
+    else errors.push(`${where}.emphasize must be "headline" or an item index 0 to ${Math.max(items.length - 1, 0)} (got ${show(raw.emphasize)}).`)
+  }
+  if (template === 'notes' && items.length === 0) errors.push(`${where}: the notes template needs at least one item.`)
+  if (errors.length || !template) return { ok: false, errors }
+  return { ok: true, spec: { template, headline, support, label, items, emphasize, gather: template === 'notes' && raw.gather === true } }
+}
+
+/** Seconds a viewer needs to read a graphic: a settle-in allowance plus three words per second. */
+export function graphicReadingSeconds(spec: GraphicSpec): number {
+  const words = [spec.headline, spec.support, spec.label, ...spec.items.flatMap((i) => [i.label, i.text])].join(' ').split(/\s+/).filter(Boolean).length
+  return r1(1.2 + words / 3)
+}
+
+/** Fill in defaults for scenes saved before graphics existed. */
+export function normaliseScene(scene: Partial<PlanScene> & { id: string; narration: string; visual: string; seconds: number }): PlanScene {
+  const kind = scene.kind === 'graphic' ? 'graphic' : 'asset'
+  const graphic = kind === 'graphic' ? { ...EMPTY_GRAPHIC, ...(scene.graphic ?? {}) } : scene.graphic ?? null
+  return { id: scene.id, narration: scene.narration, visual: scene.visual, seconds: scene.seconds, kind, graphic }
 }
 
 export interface ContentPlan {
@@ -126,10 +209,23 @@ export function parsePlan(text: string): ImportResult {
       if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < MIN_SECONDS || seconds > MAX_SECONDS) {
         errors.push(`${at}.seconds must be a number between ${MIN_SECONDS} and ${MAX_SECONDS} (got ${show(seconds)}).`)
       }
-      const known = new Set(['id', 'narration', 'visual', 'seconds'])
+      const known = new Set(['id', 'narration', 'visual', 'seconds', 'kind', 'graphic'])
       const extra = Object.keys(s).filter((k) => !known.has(k))
       if (extra.length) warnings.push(`${at}: ignored unknown field(s) ${extra.join(', ')}.`)
-      scenes.push({ id: `s${i + 1}`, narration, visual, seconds: typeof seconds === 'number' ? r1(seconds) : 0 })
+      let kind: PlanScene['kind'] = 'asset'
+      let graphic: GraphicSpec | null = null
+      if (s.kind !== undefined && s.kind !== 'asset' && s.kind !== 'graphic') errors.push(`${at}.kind must be "asset" or "graphic" (got ${show(s.kind)}).`)
+      if (s.kind === 'graphic' || (s.kind === undefined && s.graphic !== undefined && s.graphic !== null)) {
+        const g = validateGraphic(s.graphic, `${at}.graphic`)
+        if (g.ok) {
+          kind = 'graphic'
+          graphic = g.spec
+          if (typeof seconds === 'number' && seconds < graphicReadingSeconds(g.spec) - 0.05) {
+            warnings.push(`${at}: the graphic needs about ${graphicReadingSeconds(g.spec)}s to read but the scene is ${seconds}s.`)
+          }
+        } else errors.push(...g.errors)
+      }
+      scenes.push({ id: `s${i + 1}`, narration, visual, seconds: typeof seconds === 'number' ? r1(seconds) : 0, kind, graphic })
     })
   }
 
@@ -169,7 +265,9 @@ export function parsePlan(text: string): ImportResult {
 export const totalSeconds = (scenes: PlanScene[]) => r1(scenes.reduce((sum, s) => sum + s.seconds, 0))
 
 export const planSnapshot = (plan: ContentPlan | null) =>
-  plan === null ? '' : JSON.stringify([plan.hooks, plan.recommendedHook, plan.script, plan.scenes.map((s) => [s.narration, s.visual, s.seconds]), plan.claimsToVerify])
+  plan === null
+    ? ''
+    : JSON.stringify([plan.hooks, plan.recommendedHook, plan.script, plan.scenes.map((s) => [s.narration, s.visual, s.seconds, s.kind, s.kind === 'graphic' ? s.graphic : null]), plan.claimsToVerify])
 
 export const planSummary = (plan: ContentPlan) =>
   `${plan.hooks.length} hook${plan.hooks.length === 1 ? '' : 's'}, ${plan.scenes.length} scene${plan.scenes.length === 1 ? '' : 's'}, ${totalSeconds(plan.scenes)}s`

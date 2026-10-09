@@ -22,7 +22,14 @@ export interface RenderOutput {
   timeline: number
   voiceDuration: number
   assetCount: number
+  graphicCount: number
+  silent: boolean
 }
+
+/** One entry of a structured timeline sent to the render service. */
+export type TimelineEntry =
+  | { seconds: number; source: 'asset' }
+  | { seconds: number; source: 'graphic'; graphic: import('./plan').GraphicSpec }
 
 export interface RenderJob {
   id: string
@@ -82,7 +89,7 @@ export async function getJob(id: string): Promise<RenderJob> {
 export async function fetchOutput(id: string, output: RenderOutput): Promise<File> {
   const res = await fetch(`/api/renders/${encodeURIComponent(id)}/output`, { cache: 'no-store' })
   if (!res.ok) throw new Error(await readError(res, `Could not fetch the rendered file (${res.status})`))
-  return new File([await res.blob()], `qb-preview-${id.slice(0, 8)}.${output.ext}`, { type: output.mime })
+  return new File([await res.blob()], `qb-preview${output.silent ? '-silent' : ''}-${id.slice(0, 8)}.${output.ext}`, { type: output.mime })
 }
 
 export async function deleteJob(id: string): Promise<void> {

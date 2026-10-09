@@ -30,9 +30,10 @@ async function fileBlob(file, type) {
   return new Blob([await readFile(file)], { type })
 }
 
-async function submit({ voice = fx.voice, assets, durations }) {
+async function submit({ voice = fx.voice, assets, durations, timeline }) {
   const form = new FormData()
-  form.append('durations', JSON.stringify(durations))
+  if (timeline) form.append('timeline', JSON.stringify(timeline))
+  else form.append('durations', JSON.stringify(durations))
   if (voice) form.append('voiceover', await fileBlob(voice, 'audio/wav'), path.basename(voice))
   for (const a of assets) form.append('asset', await fileBlob(a, 'application/octet-stream'), path.basename(a))
   const res = await fetch(`${base}/api/renders`, { method: 'POST', body: form })
@@ -104,7 +105,7 @@ describe('render service', () => {
     expect(job.output.duration).toBeGreaterThan(4.9)
     expect(job.output.duration).toBeLessThan(5.2)
     expect(job.notes).toEqual([
-      expect.stringMatching(/Clip 3 .* is 1s but set to 2s, so its last frame holds for 1s/),
+      expect.stringMatching(/Clip in scene 3 .* is 1s but set to 2s, so its last frame holds for 1s/),
       expect.stringMatching(/longer than the voiceover .* last 1s is silent/),
     ])
 
@@ -142,8 +143,12 @@ describe('render service', () => {
     expect(outLevel).toBeLessThan(voiceLevel + 3)
   })
 
-  it('refuses a render with no voiceover, with no assets, or with mismatched durations', async () => {
-    expect((await submit({ voice: null, assets: [fx.orange], durations: [2] })).body.error).toMatch(/voiceover file is required/)
+  it('allows no voiceover as a silent preview; refuses no assets or mismatched durations', async () => {
+    const silent = await submit({ voice: null, assets: [fx.orange], durations: [1] })
+    expect(silent.status).toBe(202)
+    const silentJob = await waitFor(silent.body.id)
+    expect(silentJob.status).toBe('done')
+    expect(silentJob.output.silent).toBe(true)
     expect((await submit({ assets: [], durations: [] })).body.error).toMatch(/at least one image or video/)
     expect((await submit({ assets: [fx.orange], durations: [2, 2] })).status).toBe(202)
     const job = await waitFor((await submit({ assets: [fx.orange], durations: [2, 2] })).body.id)
@@ -173,5 +178,81 @@ describe('render service', () => {
     expect((await res.json()).error).toMatch(/not a supported image or video/)
     expect((await fetch(`${base}/api/renders/../../etc/passwd`)).status).toBe(404)
     expect((await fetch(`${base}/api/renders/zzzz`)).status).toBe(404)
+  })
+})
+
+describe('structured timeline with graphic scenes', () => {
+  const graphicScenes = [
+    { seconds: 2.5, source: 'graphic', graphic: { template: 'card', label: 'Morning', headline: 'Leak under the sink', items: [{ label: 'Request', text: 'Resident call' }], emphasize: 0 } },
+    { seconds: 3, source: 'graphic', graphic: { template: 'notes', headline: 'One handoff', gather: true, emphasize: 3, items: [{ label: 'Request', text: 'Leak' }, { label: 'Tried', text: 'Easy fix' }, { label: 'Owner', text: 'Evening desk' }, { label: 'Next', text: 'Visit' }] } },
+    { seconds: 2, source: 'graphic', graphic: { template: 'question', headline: 'Where does your team lose the thread?' } },
+  ]
+
+  it('renders a complete silent preview from graphics alone, with no uploads', async () => {
+    const { status, body } = await submit({ voice: null, assets: [], timeline: graphicScenes })
+    expect(status).toBe(202)
+    const job = await waitFor(body.id)
+    expect(job.error).toBeNull()
+    expect(job.output).toMatchObject({ width: 720, height: 1280, timeline: 7.5, voiceDuration: 0, assetCount: 3, graphicCount: 3, silent: true })
+    expect(job.output.duration).toBeGreaterThan(7.4)
+    expect(job.notes).toContain('Silent preview: no voiceover was attached, so the audio track is silence.')
+
+    const res = await fetch(`${base}/api/renders/${body.id}/output`)
+    const out = path.join(scratch, 'graphics.mp4')
+    await (await import('node:fs/promises')).writeFile(out, Buffer.from(await res.arrayBuffer()))
+    const info = await probe(out)
+    expect(info).toMatchObject({ kind: 'video', width: 720, height: 1280, hasAudio: true })
+
+    // Text is on screen in each scene after its entrance, and the frame is dark at the very start.
+    const [start, card, gathered, question] = await Promise.all([meanColorAt(out, 0.03), meanColorAt(out, 1.8), meanColorAt(out, 5.2), meanColorAt(out, 6.9)])
+    const lum = (c) => c[0] + c[1] + c[2]
+    expect(lum(start)).toBeLessThan(40)
+    expect(lum(card)).toBeGreaterThan(lum(start) + 30)
+    expect(lum(gathered)).toBeGreaterThan(lum(start) + 30)
+    expect(lum(question)).toBeGreaterThan(lum(start) + 30)
+
+    // The silent track really is silent.
+    const { run, FFMPEG } = await import('./ffmpeg.mjs')
+    const { stderr } = await run(FFMPEG, ['-hide_banner', '-i', out, '-af', 'volumedetect', '-f', 'null', '-'])
+    expect(Number(/max_volume: (-?[\d.]+) dB/.exec(stderr)?.[1])).toBeLessThan(-80)
+  })
+
+  it('mixes uploaded assets and graphics in one timeline with the voiceover', async () => {
+    const timeline = [
+      { seconds: 1.5, source: 'asset' },
+      graphicScenes[0],
+      { seconds: 1.5, source: 'asset' },
+    ]
+    const { status, body } = await submit({ assets: [fx.orange, fx.cream], timeline })
+    expect(status).toBe(202)
+    const job = await waitFor(body.id)
+    expect(job.error).toBeNull()
+    expect(job.output).toMatchObject({ timeline: 5.5, graphicCount: 1, silent: false, voiceDuration: 4 })
+    const res = await fetch(`${base}/api/renders/${body.id}/output`)
+    const out = path.join(scratch, 'mixed.mp4')
+    await (await import('node:fs/promises')).writeFile(out, Buffer.from(await res.arrayBuffer()))
+    const [a, c] = await Promise.all([meanColorAt(out, 0.5), meanColorAt(out, 5.0)])
+    expect(a[0]).toBeGreaterThan(200) // orange first
+    expect(c.every((v) => v > 200)).toBe(true) // cream last
+  })
+
+  it('reports timeline problems before rendering', async () => {
+    const bad = async (timeline, assets = []) => {
+      const { body, status } = await submit({ assets, timeline })
+      if (status !== 202) return body.error
+      return (await waitFor(body.id)).error
+    }
+    expect(await bad([{ seconds: 2, source: 'asset' }])).toMatch(/needs an uploaded asset but only 0 were sent/)
+    expect(await bad([{ seconds: 2, source: 'graphic', graphic: { template: 'card' } }])).toMatch(/Scene 1 graphic.headline is required/)
+    expect(await bad([{ seconds: 2, source: 'graphic', graphic: { headline: 'x' } }], [fx.orange])).toMatch(/1 asset sent but the timeline uses 0/)
+    expect(await bad([{ seconds: 2, source: 'hologram' }])).toMatch(/unknown source "hologram"/)
+    expect(await bad([{ seconds: 0.5, source: 'graphic', graphic: { headline: 'A long enough headline to need reading time', support: 'and more words to read here' } }])).toBeNull()
+  })
+
+  it('warns when a graphic has more words than its seconds allow', async () => {
+    const { body } = await submit({ voice: null, assets: [], timeline: [{ seconds: 1, source: 'graphic', graphic: { headline: 'Eight words that need more than one second here', support: 'plus a support line to read as well' } }] })
+    const job = await waitFor(body.id)
+    expect(job.status).toBe('done')
+    expect(job.notes).toEqual(expect.arrayContaining([expect.stringMatching(/Scene 1 shows text that needs about [\d.]+s to read but is set to 1s/)]))
   })
 })

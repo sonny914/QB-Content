@@ -27,10 +27,51 @@ versions it doesn't understand and says so.
 | `hooks` | yes | 1–5 non-empty strings. The prompt asks for exactly 3; another count is a warning. |
 | `recommendedHook` | no | Integer index into `hooks`. Defaults to `0`. |
 | `script` | yes | Non-empty string: the full narration. |
-| `scenes` | yes | 1–20 objects. Each needs `narration` (non-empty string), `visual` (non-empty string) and `seconds` (number, 0.5–300, kept to one decimal). The app assigns ids `s1`, `s2`, … in order. |
+| `scenes` | yes | 1–20 objects. Each needs `narration` (non-empty string), `visual` (non-empty string) and `seconds` (number, 0.5–300, kept to one decimal). Optional `kind` (`"asset"`, the default, or `"graphic"`) and `graphic` (below). The app assigns ids `s1`, `s2`, … in order. |
 | `claimsToVerify` | no | Array of strings. Anything the narration relies on that did not come from the supplied inputs. Shown in the app as "verify before publishing". |
 
 Unknown fields are ignored with a warning. Warnings never block an import; errors always do.
+
+## Graphic scenes
+
+A scene with `"kind": "graphic"` (or simply a `graphic` object) is drawn by the local renderer instead of
+showing an uploaded file. The renderer understands only these properties; `visual` stays a description
+for people.
+
+```json
+{
+  "narration": "Day shift logs it, tries the easy fix, clocks out.",
+  "visual": "Day shift's card",
+  "seconds": 4,
+  "kind": "graphic",
+  "graphic": {
+    "template": "card",
+    "label": "Day shift",
+    "headline": "Logged.",
+    "support": "",
+    "items": [{ "label": "Tried", "text": "The easy fix" }, { "label": "Then", "text": "Clocked out" }],
+    "emphasize": 1,
+    "gather": false
+  }
+}
+```
+
+| Property | Rules |
+|---|---|
+| `template` | `title` (headline, optional support), `card` (labelled card with items entering one by one), `notes` (separate notes scattered across the frame; `gather: true` makes them travel into one card mid-scene), `question` (closing question with an orange rule). Default `title`. |
+| `headline` | Required, up to 90 characters. Wrapped and shrunk to fit the frame. |
+| `support` | Optional, up to 160 characters. |
+| `label` | Optional small-caps label such as "Morning", up to 24 characters. |
+| `items` | Up to 4 `{ label, text }` entries (label ≤ 20, text ≤ 60 characters). `notes` needs at least one. |
+| `emphasize` | `"headline"` or an item index. Lights that element orange just past the middle of the scene. |
+| `gather` | `notes` only. |
+
+Motion is fixed per template: fade-and-rise entrances (items staggered), the emphasis pulse, the
+gather, and a short fade at the end. Colours are QB's black, cream and orange. Text always stays inside
+the frame's safe area; a scene with more words than its seconds allow gets a warning (about three words
+per second plus a settle-in second).
+
+`docs/examples/handoff-reel-plan.json` is a complete plan built from graphic scenes only.
 
 ## Where it goes
 

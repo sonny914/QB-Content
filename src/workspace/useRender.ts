@@ -1,7 +1,7 @@
 // Drives one render through the local service: upload with progress, poll, fetch the file, clean up.
 // Shared by the free-form "Create a preview" panel and the content plan handoff.
 import { useEffect, useRef, useState } from 'react'
-import { deleteJob, fetchHealth, fetchOutput, getJob, submitRender, type RenderHealth, type RenderOutput } from './renderClient'
+import { deleteJob, fetchHealth, fetchOutput, getJob, submitRender, type RenderHealth, type RenderOutput, type TimelineEntry } from './renderClient'
 import { formatSize, r1 } from './assets'
 
 export type RenderPhase = 'idle' | 'uploading' | 'checking' | 'rendering' | 'loading' | 'done' | 'failed'
@@ -13,9 +13,14 @@ export interface RenderedPreview {
 }
 
 export interface RenderInput {
-  voice: File
+  /** null renders a clearly labelled silent preview. */
+  voice: File | null
+  /** Uploaded files, in the order the timeline's asset entries consume them. */
   assets: File[]
-  durations: number[]
+  /** Legacy free-form render: one duration per asset. */
+  durations?: number[]
+  /** Structured timeline mixing uploaded assets and motion graphics. */
+  timeline?: TimelineEntry[]
 }
 
 export interface RenderState {
@@ -69,8 +74,9 @@ export function useRender() {
     let jobId: string | null = null
     try {
       const form = new FormData()
-      form.append('durations', JSON.stringify(input.durations))
-      form.append('voiceover', input.voice, input.voice.name)
+      if (input.timeline) form.append('timeline', JSON.stringify(input.timeline))
+      else form.append('durations', JSON.stringify(input.durations ?? []))
+      if (input.voice) form.append('voiceover', input.voice, input.voice.name)
       for (const a of input.assets) form.append('asset', a, a.name)
       jobId = await submitRender(form, (f) => setProgress(f))
 
@@ -86,7 +92,7 @@ export function useRender() {
           const file = await fetchOutput(jobId, job.output)
           await onRendered({ file, output: job.output, notes: job.notes })
           setPhase('done')
-          setMessage(`Preview ready: ${job.output.width}×${job.output.height}, ${r1(job.output.duration)}s, ${formatSize(job.output.size)}`)
+          setMessage(`${job.output.silent ? 'Silent preview ready' : 'Preview ready'}: ${job.output.width}×${job.output.height}, ${r1(job.output.duration)}s, ${formatSize(job.output.size)}`)
           return true
         }
         setPhase(job.status === 'rendering' ? 'rendering' : 'checking')

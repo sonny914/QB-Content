@@ -62,7 +62,7 @@ async function route(req, res, store, tools) {
 async function receiveRender(req, res, store) {
   let bb
   try {
-    bb = Busboy({ headers: req.headers, limits: { files: MAX_FILES, fileSize: MAX_FILE_BYTES, fields: 5, fieldSize: 10_000 } })
+    bb = Busboy({ headers: req.headers, limits: { files: MAX_FILES, fileSize: MAX_FILE_BYTES, fields: 5, fieldSize: 200_000 } })
   } catch (err) {
     return sendJson(res, 400, { error: `Bad upload: ${err.message}` })
   }
@@ -122,15 +122,18 @@ async function receiveRender(req, res, store) {
   await finished
   await Promise.all(writes)
 
-  let durations
+  let durations = null
+  let timeline = null
   try {
-    durations = JSON.parse(fields.durations ?? 'null')
+    if (fields.timeline !== undefined) timeline = JSON.parse(fields.timeline)
+    else durations = JSON.parse(fields.durations ?? 'null')
   } catch {
-    fail(400, 'The durations field is not valid JSON')
+    fail(400, `The ${fields.timeline !== undefined ? 'timeline' : 'durations'} field is not valid JSON`)
   }
-  if (!failure && !files.voiceover) fail(400, 'A voiceover file is required')
-  if (!failure && files.assets.length === 0) fail(400, 'Add at least one image or video clip')
-  if (!failure && [files.voiceover, ...files.assets].some((f) => f.size === 0)) fail(400, 'One of the files is empty')
+  // A voiceover is optional: without one the result is a clearly labelled silent preview.
+  if (!failure && timeline === null && files.assets.length === 0) fail(400, 'Add at least one image or video clip')
+  if (!failure && timeline !== null && (!Array.isArray(timeline) || timeline.length === 0)) fail(400, 'The timeline needs at least one scene')
+  if (!failure && [files.voiceover, ...files.assets].filter(Boolean).some((f) => f.size === 0)) fail(400, 'One of the files is empty')
 
   if (failure) {
     await store.remove(job.id)
@@ -139,7 +142,7 @@ async function receiveRender(req, res, store) {
 
   sendJson(res, 202, { id: job.id })
   // Fire and forget: the client polls GET /api/renders/:id for status.
-  void store.start(job, { voiceover: files.voiceover, assets: files.assets, durations })
+  void store.start(job, { voiceover: files.voiceover, assets: files.assets, durations, timeline })
 }
 
 function sanitizeName(name) {

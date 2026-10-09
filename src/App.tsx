@@ -79,7 +79,7 @@ export default function App() {
   const stale = staleRenderReason(state)
 
   /** Hash a file and make it the current video version. Used for picked files and local renders alike. */
-  async function attachFile(file: File, origin: 'attached' | 'rendered', detail?: string, renderSource?: RenderSource) {
+  async function attachFile(file: File, origin: 'attached' | 'rendered', detail?: string, renderSource?: RenderSource, silent = false) {
     const checkId = ++fileCheckId.current
     setChecking(true)
     setFileError('')
@@ -88,7 +88,7 @@ export default function App() {
       if (checkId !== fileCheckId.current) return
       setPlayError(false)
       setVideoUrl(URL.createObjectURL(file))
-      dispatch({ type: 'attach', video: { ...video, origin, ...(renderSource ? { renderSource } : {}) }, at: now(), detail })
+      dispatch({ type: 'attach', video: { ...video, origin, ...(renderSource ? { renderSource } : {}), ...(silent ? { silent } : {}) }, at: now(), detail })
     } catch {
       if (checkId === fileCheckId.current) {
         setFileError('Could not read or verify this file. Choose it again or try another local video. The previous preview has not changed.')
@@ -104,18 +104,22 @@ export default function App() {
     if (file) await attachFile(file, 'attached')
   }
 
+  const audioWord = (output: RenderedPreview['output']) => (output.silent ? 'silent preview, no voiceover' : 'voiceover')
+
   async function onRendered({ file, output }: RenderedPreview) {
     const seconds = Math.round(output.duration * 10) / 10
-    await attachFile(file, 'rendered', `${output.assetCount} asset${output.assetCount === 1 ? '' : 's'} + voiceover, ${seconds}s`)
+    await attachFile(file, 'rendered', `${output.assetCount} asset${output.assetCount === 1 ? '' : 's'} + ${audioWord(output)}, ${seconds}s`, undefined, output.silent)
   }
 
   async function onRenderedFromPlan({ file, output }: RenderedPreview, source: RenderSource) {
     const seconds = Math.round(output.duration * 10) / 10
+    const graphics = output.graphicCount > 0 ? ` (${output.graphicCount} motion graphic${output.graphicCount === 1 ? '' : 's'})` : ''
     await attachFile(
       file,
       'rendered',
-      `from plan v${source.planVersion}: ${output.assetCount} scene${output.assetCount === 1 ? '' : 's'} + voiceover, ${seconds}s`,
+      `from plan v${source.planVersion}: ${output.assetCount} scene${output.assetCount === 1 ? '' : 's'}${graphics} + ${audioWord(output)}, ${seconds}s`,
       source,
+      output.silent,
     )
   }
 
@@ -259,6 +263,11 @@ export default function App() {
                 {playError && (
                   <p className="error">This browser can't play this file, so it can't be reviewed or approved here.</p>
                 )}
+                {attached.silent && (
+                  <p className="warn" role="status" data-testid="silent-notice">
+                    <strong>Silent preview.</strong> No voiceover was attached to this render, so it shows timing and visuals only.
+                  </p>
+                )}
                 {stale && (
                   <p className="warn" role="status" data-testid="stale-render">
                     <strong>Out of date.</strong> {stale}
@@ -270,6 +279,7 @@ export default function App() {
                     <dd>
                       {attached.name} · {formatSize(attached.size)}
                       {attached.origin === 'rendered' && (attached.renderSource ? ` · rendered locally from plan v${attached.renderSource.planVersion}` : ' · rendered locally')}
+                      {attached.silent && ' · silent preview'}
                     </dd>
                   </div>
                   <div>

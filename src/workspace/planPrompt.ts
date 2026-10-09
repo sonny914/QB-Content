@@ -18,7 +18,7 @@ RULES
 2. If a line would need a fact that is not supplied, leave it out or write a placeholder in square brackets, e.g. "[number] years", and list what the owner must confirm in "claimsToVerify". Every item in "claimsToVerify" must describe one concrete thing to check.
 3. No promises about outcomes, no superlatives that would need proof.
 4. Write the narration for speaking aloud: short sentences, plain words, 90 to 140 words in total.
-5. Plan 3 to 8 scenes of 2 to 8 seconds each. One idea per scene. "visual" describes something the owner can film or already has (the product, the workspace, hands at work, a screen, a simple text card). Do not describe generated or stock imagery.
+5. Plan 3 to 8 scenes of 2 to 8 seconds each. One idea per scene. "visual" describes something the owner can film or already has (the product, the workspace, hands at work, a screen, a simple text card). Do not describe generated or stock imagery. A scene that works as on-screen text can instead carry a "graphic" object (see OUTPUT); the app draws those itself, and only the listed properties are understood.
 6. Scene 1 is the hook and its narration starts with the recommended hook. The last scene is the call to action and uses the supplied call to action word for word. If no call to action was supplied, end on a plain invitation and add "call to action wording" to "claimsToVerify".
 7. Match the supplied tone. If none was supplied, write plainly.
 
@@ -31,9 +31,13 @@ Reply with one JSON object and nothing else: no introduction, no explanation, no
   "recommendedHook": 0,
   "script": "<the full narration: the scene narrations joined in order>",
   "scenes": [
-    { "narration": "<the words spoken during this scene>", "visual": "<what is on screen>", "seconds": 4 }
+    { "narration": "<the words spoken during this scene>", "visual": "<what is on screen>", "seconds": 4 },
+    { "narration": "<spoken words>", "visual": "<what is on screen>", "seconds": 4, "kind": "graphic",
+      "graphic": { "template": "card", "label": "<small caps label, optional>", "headline": "<up to 90 characters>", "support": "<optional line, up to 160 characters>",
+                   "items": [{ "label": "<up to 20 characters>", "text": "<up to 60 characters>" }], "emphasize": 0 } }
   ],
   "claimsToVerify": ["<one concrete thing the owner must confirm before publishing>"]
 }
-"hooks": exactly three different opening lines of at most 12 words each. "recommendedHook": 0, 1 or 2, the one you would use. "seconds": a number to one decimal place, sized for a natural speaking pace of about 2.5 words per second. "claimsToVerify": an empty array if the narration relies on supplied information only.`
+"hooks": exactly three different opening lines of at most 12 words each. "recommendedHook": 0, 1 or 2, the one you would use. "seconds": a number to one decimal place, sized for a natural speaking pace of about 2.5 words per second. "claimsToVerify": an empty array if the narration relies on supplied information only.
+"graphic" (optional, for text-on-screen scenes): "template" is one of "title" (headline with optional support line), "card" (a labelled card with up to 4 label/text items that enter one by one), "notes" (up to 4 separate notes; add "gather": true to have them gather into one card during the scene) or "question" (a closing question). "emphasize" is "headline" or the index of the item to light up in orange. Keep the words on screen few: viewers read about three words per second.`
 }
