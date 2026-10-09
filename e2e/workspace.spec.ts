@@ -30,7 +30,7 @@ test.beforeEach(async ({ page }) => {
 test('starts in Draft, labelled as a local prototype', async ({ page }) => {
   await expect(status(page)).toHaveText('Draft')
   await expect(page.getByText('Single-user local prototype')).toBeVisible()
-  await expect(page.getByText(/Videos are never uploaded or stored/)).toBeVisible()
+  await expect(page.getByText(/Nothing is sent to any external service/)).toBeVisible()
   await expect(approveBtn(page)).toBeDisabled()
   await expect(page.getByTestId('blockers')).toHaveText('Attach the reel video.')
 })
@@ -150,7 +150,7 @@ test('file read failures show a recoverable error', async ({ page }) => {
   })
   await page.getByTestId('video-input').setInputFiles(VIDEO_A)
   await expect(page.getByRole('alert')).toContainText('Could not read or verify')
-  await expect(page.getByRole('button', { name: 'Choose video', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Choose video file', exact: true })).toBeEnabled()
   await expect(approveBtn(page)).toBeDisabled()
 })
 

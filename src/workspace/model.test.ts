@@ -161,6 +161,28 @@ function currentVersion(s: State) {
   return s.videos.find((v) => v.hash === s.currentVideoHash)?.version
 }
 
+describe('rendered previews', () => {
+  const rendered = { hash: 'sha256:ccc', hashKind: 'sha256' as const, name: 'qb-preview.mp4', size: 300, origin: 'rendered' as const }
+
+  it('a render arrives as a new, unapproved video version with its own activity entry', () => {
+    const s = run(initialState(AT), { type: 'attach', video: rendered, at: AT, detail: '2 assets + voiceover, 4s' })
+    expect(s.status).toBe('draft')
+    expect(s.session.watched).toBe(false)
+    expect(approvalBlockers(s)).toEqual(['Watch the preview through to the end.'])
+    expect(s.activity.at(-1)).toMatchObject({ kind: 'video_rendered', text: 'Video v1 rendered locally (2 assets + voiceover, 4s): qb-preview.mp4' })
+    expect(currentVersion(s)).toBe(1)
+  })
+
+  it('a new render replaces the current video and withdraws approval', () => {
+    const s = reducer(approvedState(), { type: 'attach', video: rendered, at: AT })
+    expect(s.status).toBe('draft')
+    expect(s.approval).toBeNull()
+    expect(currentVersion(s)).toBe(2)
+    expect(s.activity.map((e) => e.kind).slice(-2)).toEqual(['video_rendered', 'approval_withdrawn'])
+    expect(s.activity.at(-2)?.text).toContain('(replaces v1)')
+  })
+})
+
 describe('approval reliability regressions', () => {
   it('reload clears current approval but retains history until explicit reapproval', () => {
     const store = memoryStore()

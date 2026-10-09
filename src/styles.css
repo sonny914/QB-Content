@@ -119,3 +119,34 @@ video { display: block; width: 100%; max-height: 70vh; background: #0a0a0a; bord
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
+
+/* Create a preview */
+.field-label { font-size: 0.8125rem; color: var(--cream-dim); }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.warn {
+  margin: 0 0 14px; padding: 10px 12px; border: 1px dashed var(--cream-line); border-radius: 8px;
+  font-size: 0.875rem; color: var(--cream);
+}
+.warn code, .prototype-note code { font-size: 0.8125rem; padding: 1px 5px; border: 1px solid var(--cream-faint); border-radius: 4px; }
+.warn-line { color: var(--cream); font-size: 0.8125rem; margin: 6px 0 0; }
+.link { font: inherit; font-size: inherit; background: none; border: 0; padding: 0; color: var(--cream); text-decoration: underline; cursor: pointer; }
+.link:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.assets { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; }
+.asset { display: grid; grid-template-columns: 56px 1fr; gap: 12px; align-items: start; padding: 10px; border: 1px solid var(--cream-faint); border-radius: 8px; }
+.thumb { width: 56px; height: 72px; object-fit: contain; background: #0a0a0a; border-radius: 6px; display: block; }
+.asset-main { min-width: 0; display: grid; gap: 8px; }
+.asset-name { font-size: 0.875rem; overflow-wrap: anywhere; }
+.seconds { display: inline-flex; align-items: center; gap: 6px; font-size: 0.875rem; color: var(--cream); }
+.seconds input { width: 84px; font: inherit; color: var(--cream); background: var(--black); border: 1px solid var(--cream-line); border-radius: 8px; padding: 8px 10px; }
+.btn-small { min-height: 36px; padding: 0 12px; font-size: 0.8125rem; }
+
+.render-status { margin-top: 12px; display: grid; gap: 8px; }
+.progress { height: 6px; border-radius: 999px; background: var(--cream-faint); overflow: hidden; }
+.progress-bar { height: 100%; background: var(--cream); transition: width 0.2s linear; }
+.notes { margin: 0; padding-left: 18px; font-size: 0.8125rem; color: var(--cream-dim); }
+
+.download { margin-top: 14px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.download .btn { display: inline-flex; align-items: center; text-decoration: none; }
+a.btn-outline:hover { background: var(--cream-faint); }
+.btn-outline:disabled { border-color: var(--cream-line); color: var(--cream-dim); opacity: 1; }

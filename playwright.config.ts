@@ -6,7 +6,9 @@ export default defineConfig({
   outputDir: 'test-results',
   use: { baseURL: 'http://localhost:4173' },
   webServer: {
-    command: 'npx vite build && npx vite preview --port 4173 --strictPort',
+    command: 'npx vite build && node scripts/dev.mjs preview',
+    // Playwright's Chromium cannot decode H.264/AAC, so the tests render to VP9/Opus WebM instead.
+    env: { QB_RENDER_FORMAT: 'webm' },
     url: 'http://localhost:4173',
     reuseExistingServer: true,
   },

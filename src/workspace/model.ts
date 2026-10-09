@@ -24,6 +24,8 @@ export interface VideoVersion {
   name: string
   size: number
   version: number
+  /** 'rendered' when the local render service assembled it from a voiceover and assets. */
+  origin?: 'attached' | 'rendered'
 }
 
 export interface Approval {
@@ -39,6 +41,7 @@ export type ActivityKind =
   | 'brief_edited'
   | 'sample_loaded'
   | 'video_attached'
+  | 'video_rendered'
   | 'video_reattached'
   | 'video_replaced'
   | 'video_reviewed'
@@ -86,7 +89,7 @@ export type Action =
   | { type: 'edit'; field: BriefField; value: string; at: string }
   | { type: 'commit'; at: string }
   | { type: 'loadSample'; brief: Brief; at: string }
-  | { type: 'attach'; video: Omit<VideoVersion, 'version'>; at: string }
+  | { type: 'attach'; video: Omit<VideoVersion, 'version'>; at: string; detail?: string }
   | { type: 'watched'; at: string }
   | { type: 'requestChanges'; note: string; at: string }
   | { type: 'approve'; at: string }
@@ -227,15 +230,20 @@ export function reducer(s: State, a: Action): State {
         currentVideoHash: version.hash,
         session: { attached: version, watched: false },
       }
+      const rendered = a.video.origin === 'rendered'
+      const describe = (v: VideoVersion) =>
+        rendered ? `Video v${v.version} rendered locally${a.detail ? ` (${a.detail})` : ''}: ${v.name}` : `Video v${v.version} attached: ${v.name}`
       if (prevHash === null) {
-        next = log(next, a.at, 'video_attached', `Video v${version.version} attached: ${version.name}`)
+        next = log(next, a.at, rendered ? 'video_rendered' : 'video_attached', describe(version))
       } else if (prevHash === version.hash) {
         next = backToDraft(next, a.at, 'video reattached for fresh review')
         next = log(next, a.at, 'video_reattached', `Video v${version.version} attached again for review: ${version.name}`)
       } else {
         const prev = s.videos.find((v) => v.hash === prevHash)
-        next = log(next, a.at, 'video_replaced', `Video replaced: v${prev?.version ?? '?'} → v${version.version} (${version.name})`)
-        next = backToDraft(next, a.at, 'video replaced')
+        next = rendered
+          ? log(next, a.at, 'video_rendered', `${describe(version)} (replaces v${prev?.version ?? '?'})`)
+          : log(next, a.at, 'video_replaced', `Video replaced: v${prev?.version ?? '?'} → v${version.version} (${version.name})`)
+        next = backToDraft(next, a.at, rendered ? 'new render' : 'video replaced')
       }
       return next
     }

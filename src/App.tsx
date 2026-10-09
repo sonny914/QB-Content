@@ -13,6 +13,7 @@ import {
 import { SAMPLE_BRIEF } from './workspace/sample'
 import { identifyVideo } from './workspace/hash'
 import { browserStorage, clearState, loadState, saveState } from './workspace/storage'
+import CreatePreview, { type RenderedPreview } from './CreatePreview'
 
 const NOTE_DRAFT_KEY = 'qb-content:revision-note-draft:v1'
 const now = () => new Date().toISOString()
@@ -71,10 +72,8 @@ export default function App() {
   const pairedVideo = currentVideo(state)
   const briefEmpty = snapshot(state.brief) === snapshot(EMPTY_BRIEF)
 
-  async function onPickVideo(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
+  /** Hash a file and make it the current video version. Used for picked files and local renders alike. */
+  async function attachFile(file: File, origin: 'attached' | 'rendered', detail?: string) {
     const checkId = ++fileCheckId.current
     setChecking(true)
     setFileError('')
@@ -83,7 +82,7 @@ export default function App() {
       if (checkId !== fileCheckId.current) return
       setPlayError(false)
       setVideoUrl(URL.createObjectURL(file))
-      dispatch({ type: 'attach', video, at: now() })
+      dispatch({ type: 'attach', video: { ...video, origin }, at: now(), detail })
     } catch {
       if (checkId === fileCheckId.current) {
         setFileError('Could not read or verify this file. Choose it again or try another local video. The previous preview has not changed.')
@@ -91,6 +90,17 @@ export default function App() {
     } finally {
       if (checkId === fileCheckId.current) setChecking(false)
     }
+  }
+
+  async function onPickVideo(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (file) await attachFile(file, 'attached')
+  }
+
+  async function onRendered({ file, output }: RenderedPreview) {
+    const seconds = Math.round(output.duration * 10) / 10
+    await attachFile(file, 'rendered', `${output.assetCount} asset${output.assetCount === 1 ? '' : 's'} + voiceover, ${seconds}s`)
   }
 
   function onRequestChanges() {
@@ -122,6 +132,10 @@ export default function App() {
     dispatch({ type: 'reset', at: now() })
   }
 
+  const downloadName = attached
+    ? `qb-reel-v${attached.version}${attached.name.endsWith('.mp4') ? '.mp4' : attached.name.slice(attached.name.lastIndexOf('.'))}`
+    : ''
+
   return (
     <div className="app">
       <header className="topbar">
@@ -132,8 +146,11 @@ export default function App() {
       </header>
 
       <p className="prototype-note" role="note">
-        Brief text, revision notes and activity are saved in this browser only. Videos are never uploaded or stored:
-        they play from your device and must be reattached after a reload.
+        Brief text, revision notes and activity are saved in this browser only. A video you attach plays from your
+        device and is not copied anywhere. When you create a preview, the voiceover and assets are sent to the render
+        process running on this computer (localhost), assembled with FFmpeg in a temporary folder, and loaded into the
+        player; the temporary files are then removed. Nothing is sent to any external service. Videos must be reattached
+        or re-rendered after a reload.
         {!saved && <strong> This browser is refusing local storage, so changes will be lost on reload.</strong>}
       </p>
 
@@ -155,42 +172,46 @@ export default function App() {
       </section>
 
       <main className="layout">
-        <section className="panel brief" aria-labelledby="brief-h">
-          <div className="panel-head">
-            <h2 id="brief-h">Brief</h2>
-            <button type="button" className="btn btn-quiet" onClick={onLoadSample}>
-              Load fictional sample
-            </button>
-          </div>
-          {state.isSample && (
-            <p className="sample-flag" data-testid="sample-flag">
-              Fictional sample brief. Not a real client, campaign or result.
-            </p>
-          )}
-          {BRIEF_FIELDS.map((f) => {
-            const id = `brief-${f.key}`
-            const common = {
-              id,
-              value: state.brief[f.key],
-              onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-                dispatch({ type: 'edit', field: f.key, value: e.target.value, at: now() }),
-              onBlur: () => dispatch({ type: 'commit', at: now() }),
-            }
-            return (
-              <div className="field" key={f.key}>
-                <label htmlFor={id}>{f.label}</label>
-                {f.multiline ? <textarea rows={f.key === 'script' ? 9 : 3} {...common} /> : <input type="text" {...common} />}
-              </div>
-            )
-          })}
-        </section>
+        <div className="side">
+          <section className="panel brief" aria-labelledby="brief-h">
+            <div className="panel-head">
+              <h2 id="brief-h">Brief</h2>
+              <button type="button" className="btn btn-quiet" onClick={onLoadSample}>
+                Load fictional sample
+              </button>
+            </div>
+            {state.isSample && (
+              <p className="sample-flag" data-testid="sample-flag">
+                Fictional sample brief. Not a real client, campaign or result.
+              </p>
+            )}
+            {BRIEF_FIELDS.map((f) => {
+              const id = `brief-${f.key}`
+              const common = {
+                id,
+                value: state.brief[f.key],
+                onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+                  dispatch({ type: 'edit', field: f.key, value: e.target.value, at: now() }),
+                onBlur: () => dispatch({ type: 'commit', at: now() }),
+              }
+              return (
+                <div className="field" key={f.key}>
+                  <label htmlFor={id}>{f.label}</label>
+                  {f.multiline ? <textarea rows={f.key === 'script' ? 9 : 3} {...common} /> : <input type="text" {...common} />}
+                </div>
+              )
+            })}
+          </section>
+
+          <CreatePreview onRendered={onRendered} />
+        </div>
 
         <div className="side">
           <section className="panel" aria-labelledby="video-h">
             <div className="panel-head">
               <h2 id="video-h">Video preview</h2>
               <button type="button" className="btn btn-quiet" onClick={() => fileInput.current?.click()} disabled={checking}>
-                {checking ? 'Checking file…' : attached ? 'Replace video' : pairedVideo ? 'Reattach video' : 'Choose video'}
+                {checking ? 'Checking file…' : attached ? 'Replace with a file' : pairedVideo ? 'Reattach video' : 'Choose video file'}
               </button>
               <input
                 ref={fileInput}
@@ -198,7 +219,7 @@ export default function App() {
                 accept="video/*"
                 className="visually-hidden"
                 data-testid="video-input"
-                aria-label="Choose video file"
+                aria-label="Video file"
                 onChange={onPickVideo}
               />
             </div>
@@ -224,11 +245,12 @@ export default function App() {
                     <dt>File</dt>
                     <dd>
                       {attached.name} · {formatSize(attached.size)}
+                      {attached.origin === 'rendered' && ' · rendered locally'}
                     </dd>
                   </div>
                   <div>
                     <dt>Version</dt>
-                    <dd>
+                    <dd data-testid="video-version">
                       Video v{attached.version} · {shortHash(attached.hash)}
                     </dd>
                   </div>
@@ -240,11 +262,11 @@ export default function App() {
               </>
             ) : pairedVideo ? (
               <p className="empty" data-testid="reattach-notice">
-                Video v{pairedVideo.version} ({pairedVideo.name}) was attached in an earlier session. Videos aren't stored,
-                so reattach the file and watch it again before approving.
+                Video v{pairedVideo.version} ({pairedVideo.name}) was {pairedVideo.origin === 'rendered' ? 'rendered' : 'attached'} in an
+                earlier session. Videos aren't stored, so {pairedVideo.origin === 'rendered' ? 'create the preview again or attach the downloaded file' : 'reattach the file'}, then watch it again before approving.
               </p>
             ) : (
-              <p className="empty">No video attached. Pick a local file to preview it here. Nothing is uploaded.</p>
+              <p className="empty">No video yet. Create a preview from your voiceover and assets, or pick a finished video file.</p>
             )}
           </section>
 
@@ -290,6 +312,20 @@ export default function App() {
                 <li key={b}>{b}</li>
               ))}
             </ul>
+            <div className="download">
+              {approvedNow && videoUrl ? (
+                <a className="btn btn-outline" href={videoUrl} download={downloadName} data-testid="download">
+                  Download {downloadName}
+                </a>
+              ) : (
+                <button type="button" className="btn btn-outline" disabled data-testid="download">
+                  Download
+                </button>
+              )}
+              <span className="status-meta">
+                {approvedNow ? 'Approved version, ready to download.' : 'Download unlocks once this exact version is approved.'}
+              </span>
+            </div>
           </section>
 
           <section className="panel" aria-labelledby="activity-h">
