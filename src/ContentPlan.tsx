@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type Dispatch } from 'react'
 import type { Action, PlanState, RenderSource } from './workspace/model'
 import {
+  DISCLAIMER_WORDS,
   EMPTY_GRAPHIC,
   EMPTY_TICKET,
   EVENT_TYPES,
@@ -216,7 +217,7 @@ export default function ContentPlan({ plan, dispatch, health, onRendered }: Prop
   const unassigned = assetScenes.filter((s) => assignments[s.id] === undefined || !library.some((a) => a.id === assignments[s.id]))
   const graphicProblems = scenes.flatMap((s, i) => (s.kind === 'graphic' && !OPTIONAL_HEADLINE_TEMPLATES.includes(s.graphic?.template ?? 'title') && !(s.graphic?.headline ?? '').trim() ? [i + 1] : []))
   const ticketProblems = scenes.flatMap((s, i) => (s.kind === 'graphic' && s.graphic?.template === 'ticket' && !(s.graphic.ticket?.title ?? '').trim() ? [i + 1] : []))
-  const labelProblems = scenes.flatMap((s, i) => (s.kind === 'graphic' && s.graphic?.template === 'ticket' && !(s.graphic.disclaimer ?? '').trim() ? [i + 1] : []))
+  const labelProblems = scenes.flatMap((s, i) => (s.kind === 'graphic' && s.graphic?.template === 'ticket' && !DISCLAIMER_WORDS.test((s.graphic.disclaimer ?? '').trim()) ? [i + 1] : []))
   const canCreate = Boolean(imported && unassigned.length === 0 && graphicProblems.length === 0 && ticketProblems.length === 0 && labelProblems.length === 0 && serviceReady(health) && !busy)
   const byId = new Map(library.map((a) => [a.id, a]))
 
@@ -579,6 +580,20 @@ export default function ContentPlan({ plan, dispatch, health, onRendered }: Prop
                                 <input type="text" value={tk.app} maxLength={GRAPHIC_LIMITS.ticketApp} aria-label={`Ticket app name for scene ${i + 1}`} disabled={busy} onChange={(e) => setTicket({ app: e.target.value })} onBlur={commit} />
                               </label>
                             </div>
+                            <div className="row">
+                              <label className="scene-field grow">
+                                <span className="field-label">Header subtitle</span>
+                                <input type="text" value={tk.subtitle} maxLength={GRAPHIC_LIMITS.ticketSubtitle} aria-label={`Ticket subtitle for scene ${i + 1}`} disabled={busy} onChange={(e) => setTicket({ subtitle: e.target.value })} onBlur={commit} placeholder="e.g. Maintenance" />
+                              </label>
+                              <label className="scene-field grow">
+                                <span className="field-label">Empty state</span>
+                                <input type="text" value={tk.empty} maxLength={GRAPHIC_LIMITS.ticketEmpty} aria-label={`Ticket empty state for scene ${i + 1}`} disabled={busy} onChange={(e) => setTicket({ empty: e.target.value })} onBlur={commit} />
+                              </label>
+                              <label className="scene-field grow">
+                                <span className="field-label">Handover row</span>
+                                <input type="text" value={tk.handover} maxLength={GRAPHIC_LIMITS.ticketHandover} aria-label={`Ticket handover for scene ${i + 1}`} disabled={busy} onChange={(e) => setTicket({ handover: e.target.value })} onBlur={commit} />
+                              </label>
+                            </div>
                             <span className="field-label">What happens (seconds from the start of this scene; blank = already happened before it)</span>
                             {g.events.map((ev, j) => (
                               <div className="row event-row" key={j}>
@@ -605,7 +620,7 @@ export default function ContentPlan({ plan, dispatch, health, onRendered }: Prop
                             </div>
                             <div className="row">
                               <label className="scene-field grow">
-                                <span className="field-label">Fiction label, drawn under the card on every frame (required)</span>
+                                <span className="field-label">Fiction label, drawn under the card on every frame (required; must say it is an illustration)</span>
                                 <input type="text" value={g.disclaimer} maxLength={GRAPHIC_LIMITS.disclaimer} aria-label={`Fiction label for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { disclaimer: e.target.value })} onBlur={commit} />
                               </label>
                               <label className="choice">
@@ -624,13 +639,15 @@ export default function ContentPlan({ plan, dispatch, health, onRendered }: Prop
                             <span className="field-label">Orange words (space separated)</span>
                             <input type="text" value={g.accent} aria-label={`Orange words for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { accent: e.target.value })} onBlur={commit} placeholder="e.g. leak" />
                           </label>
+                          {(g.template === 'hero' || isTicket) && (
+                            <label className="seconds">
+                              <span className="field-label">{isTicket ? 'Label lands at' : 'Lands at'}</span>
+                              <input type="number" min={0} max={MAX_SECONDS} step={0.1} value={g.land ?? ''} placeholder={isTicket ? 'at once' : '0.3'} aria-label={`${isTicket ? 'Label' : 'Headline'} lands at for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { land: e.target.value === '' ? null : Math.max(0, Number(e.target.value)) })} onBlur={commit} />
+                              <span>s</span>
+                            </label>
+                          )}
                           {g.template === 'hero' && (
                             <>
-                              <label className="seconds">
-                                <span className="field-label">Lands at</span>
-                                <input type="number" min={0} max={MAX_SECONDS} step={0.1} value={g.land} aria-label={`Headline lands at for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { land: Math.max(0, Number(e.target.value)) })} onBlur={commit} />
-                                <span>s</span>
-                              </label>
                               <label className="seconds">
                                 <span className="field-label">Second line at</span>
                                 <input type="number" min={0} max={MAX_SECONDS} step={0.1} value={g.beat ?? ''} aria-label={`Second line at for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { beat: e.target.value === '' ? null : Math.max(0, Number(e.target.value)) })} onBlur={commit} placeholder="mid" />
@@ -773,7 +790,7 @@ export default function ContentPlan({ plan, dispatch, health, onRendered }: Prop
             {unassigned.length > 0 && <li>Assign an asset to {unassigned.length === assetScenes.length ? 'every asset scene' : `scene${unassigned.length === 1 ? '' : 's'} ${unassigned.map((s) => scenes.indexOf(s) + 1).join(', ')}`}, or switch {unassigned.length === 1 && assetScenes.length > 1 ? 'it to a motion graphic' : 'them to motion graphics'} (a presenter scene can also run faceless).</li>}
             {graphicProblems.length > 0 && <li>Give scene{graphicProblems.length === 1 ? '' : 's'} {graphicProblems.join(', ')} a headline.</li>}
             {ticketProblems.length > 0 && <li>Give the ticket in scene{ticketProblems.length === 1 ? '' : 's'} {ticketProblems.join(', ')} a title.</li>}
-            {labelProblems.length > 0 && <li>Scene{labelProblems.length === 1 ? '' : 's'} {labelProblems.join(', ')} need{labelProblems.length === 1 ? 's' : ''} a fiction label: a fictional interface must say so on screen.</li>}
+            {labelProblems.length > 0 && <li>Scene{labelProblems.length === 1 ? '' : 's'} {labelProblems.join(', ')} need{labelProblems.length === 1 ? 's' : ''} a fiction label that says so, e.g. "Illustration · not a real app": a fictional interface must declare itself on screen.</li>}
             {!serviceReady(health) && health !== null && <li>The local render service isn't available (see the notice above).</li>}
           </ul>
           <RenderStatus state={render} testId="plan-render-status" />

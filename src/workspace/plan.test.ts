@@ -156,7 +156,7 @@ describe('graphic scenes', () => {
     if (!r.ok) return
     expect(r.plan.scenes[0].graphic).toMatchObject({ template: 'device', theme: 'light', media: 'asset', frame: 'phone', focus: { x: 0.2, y: 0.3, w: 0.5, h: 0.3 }, zoom: { start: 0.5, end: 2 } })
     expect(r.plan.scenes[0].graphic?.captions[0]).toEqual({ start: 0.2, end: 2.4, text: 'Day shift logs it,', highlight: 'logs' })
-    expect(r.plan.scenes[1].graphic).toMatchObject({ template: 'presenter', media: 'none', headline: '', continues: false, ticket: null, events: [] })
+    expect(r.plan.scenes[1].graphic).toMatchObject({ template: 'presenter', media: 'none', headline: '', continues: false, ticket: null, events: [], land: null })
     expect(r.plan.scenes[2].graphic).toMatchObject({ land: 0.8, beat: 2, accent: 'Morning.' })
     expect(graphicNeedsAsset(r.plan.scenes[0].graphic)).toBe(true)
     expect(graphicNeedsAsset(r.plan.scenes[1].graphic)).toBe(false)
@@ -186,8 +186,8 @@ describe('graphic scenes', () => {
     ] }))
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.plan.scenes[0].graphic).toMatchObject({ template: 'ticket', headline: '', disclaimer: 'Illustration · not a real app', continues: false, ticket: { ...ticket, status: 'Open', shift: 'Day shift', app: 'Requests' } })
-    expect(r.plan.scenes[0].graphic?.events).toEqual([{ type: 'request', at: 0.7, text: '', by: '', time: '' }])
+    expect(r.plan.scenes[0].graphic).toMatchObject({ template: 'ticket', headline: '', disclaimer: 'Illustration · not a real app', continues: false, ticket: { ...ticket, status: 'Open', shift: 'Day shift', app: 'Requests', subtitle: '', empty: 'Nothing open', handover: 'Shift change' } })
+    expect(r.plan.scenes[0].graphic?.events).toEqual([{ type: 'request', at: 0.7, text: 'Request opened', by: '', time: '' }])
     expect(r.plan.scenes[1].graphic).toMatchObject({ continues: true })
     expect(r.plan.scenes[1].graphic?.events[1]).toEqual({ type: 'note', at: 0.4, text: 'Logged.', by: 'Day shift', time: '7:51 AM' })
     expect(r.plan.scenes.every((s) => !graphicNeedsAsset(s.graphic))).toBe(true) // nothing here needs an upload
@@ -197,6 +197,7 @@ describe('graphic scenes', () => {
       { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'ticket', ticket: { meta: 'x'.repeat(61) }, events: [{ type: 'alarm' }, { type: 'note', at: -2 }, { type: 'shift', text: 'x'.repeat(71) }], disclaimer: ' ' } },
       { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'ticket', ticket: 'soon', events: 'later' } },
       { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'presenter', media: 'placeholder' } },
+      { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'ticket', ticket: { title: 'x', subtitle: 'y'.repeat(25) }, disclaimer: 'Live demo' } },
     ] }))
     expect(bad.ok).toBe(false)
     if (bad.ok) return
@@ -211,6 +212,8 @@ describe('graphic scenes', () => {
       'scenes[1].graphic.ticket must be an object with at least a title.',
       'scenes[1].graphic.events must be an array.',
       'scenes[2].graphic.media must be "asset" or "none".',
+      'scenes[3].graphic.ticket.subtitle must be 24 characters or fewer.',
+      'scenes[3].graphic.disclaimer must say the interface is an illustration, e.g. "Illustration · not a real app".',
     ])
   })
 
@@ -219,8 +222,8 @@ describe('graphic scenes', () => {
     expect(old.graphic?.media).toBe('none')
     const dev = normaliseScene({ id: 's1', narration: 'n', visual: 'v', seconds: 2, kind: 'graphic', graphic: { ...EMPTY_GRAPHIC, template: 'device', media: 'none' } })
     expect(dev.graphic?.media).toBe('asset')
-    const tk = normaliseScene({ id: 's1', narration: 'n', visual: 'v', seconds: 2, kind: 'graphic', graphic: { ...EMPTY_GRAPHIC, template: 'ticket', disclaimer: '' } })
-    expect(tk.graphic).toMatchObject({ ticket: { title: '', status: 'Open' }, disclaimer: 'Illustration · not a real app' })
+    const tk = normaliseScene({ id: 's1', narration: 'n', visual: 'v', seconds: 2, kind: 'graphic', graphic: { ...EMPTY_GRAPHIC, template: 'ticket', disclaimer: '', ticket: { title: 'Leak' } as GraphicSpec['ticket'] } })
+    expect(tk.graphic).toMatchObject({ ticket: { title: 'Leak', status: 'Open', handover: 'Shift change' }, disclaimer: 'Illustration · not a real app' })
   })
 
   it('reading time counts every word on screen', () => {

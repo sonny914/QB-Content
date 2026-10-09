@@ -70,21 +70,22 @@ for people.
 | `media` | `device`: always `asset`, the next uploaded image or clip. `presenter`: `asset` for an uploaded clip of the owner, or `none` (the default): the scene then runs **faceless**, its `captions` drawn as large type in the middle of the frame as each is spoken. Missing footage never blocks a render and nothing stands in for a person. |
 | `frame` | `device` only: `auto` (phone card for portrait media, desktop card for landscape), `phone`, `desktop`. |
 | `focus` | `{ x, y, w, h }` fractions of the media to push into; the push runs over `zoom: { start, end }` seconds (default 0.4–1.6). |
-| `land`, `beat` | `hero` only: seconds when the headline hits (default 0.3) and when the support line takes over (default mid-scene). |
-| `captions` | Up to 12 cues `{ start, end, text, highlight }` in seconds from the scene start, drawn at the bottom with the `highlight` word in orange. Timing is set by hand or from the recording's pauses; nothing aligns them to speech automatically. |
-| `ticket` | `ticket` only. `{ title (required, ≤ 44), meta (≤ 60), time (≤ 12), status (default "Open"), shift (default "Day shift"), app (default "Requests") }`: the fictional request on screen. |
-| `events` | `ticket` only, up to 6 `{ type, at, text, by, time }`. `type` is `request` (the request arrives: the empty inbox gives way to the title block with a NEW chip), `note` (a note is typed into the activity feed and the view pushes in on it), `action` (an action is recorded with a check mark that draws itself) or `shift` (the shift chip rolls over to `text`, a light scene goes dark, and the still-open request lights up and pulses). `at` is seconds from the scene start; leave it out for things that already happened before the scene, so a later scene can carry the ticket on. |
-| `disclaimer` | `ticket` only. Drawn under the card on every frame; defaults to "Illustration · not a real app" and cannot be blank. A fictional interface is always labelled as one. |
-| `continues` | `true` when this scene carries on the previous scene's picture (the same ticket, say): the previous scene then does not fade at the cut and this one skips its entrance. |
+| `land`, `beat` | `hero`: seconds when the headline hits (default 0.3) and when the support line takes over (default mid-scene). `ticket`: `land` is when the chapter label punches in (default: at once). |
+| `captions` | Up to 12 cues `{ start, end, text, highlight }` in seconds from the scene start, drawn above the player's bottom overlay zone with the `highlight` word in orange. Timing is set by hand or from the recording's pauses; nothing aligns them to speech automatically. |
+| `ticket` | `ticket` only. `{ title (required, ≤ 44), meta (≤ 60), time (≤ 12), status (default "Open"), shift (default "Day shift"), app (default "Requests"), subtitle (≤ 24, header line under the app name), empty (default "Nothing open"), handover (default "Shift change", the feed row a shift change adds) }`: the fictional item on screen. The wording is yours, so the same template serves support tickets, orders, jobs or any queue of tracked items. |
+| `events` | `ticket` only, up to 6 `{ type, at, text, by, time }`. `type` is `request` (the item arrives from under the header with a NEW chip; its feed row reads `text`, default "Request opened", raised by `by`), `note` (`text` is typed into the activity feed), `action` (`text` is recorded with a check mark that draws itself) or `shift` (the shift chip rolls over to `text`, so does the chapter label, a light scene goes dark, and the still-open item lights up and pulses). The view inside the card moves on every event: in on the request, further in on a note or action, back out on a shift change; the header stays pinned. `at` is seconds from the scene start; leave it out for things that already happened before the scene, so a later scene can carry the ticket on. |
+| `disclaimer` | `ticket` only. Drawn under the card on every frame; defaults to "Illustration · not a real app". It cannot be blank and must say the interface is an illustration, fiction, mock, sample or example: both the app and the renderer reject wording that does not. |
+| `continues` | `true` when this scene carries on the previous scene's picture (the same ticket, say): the previous scene then does not fade at the cut, this one skips its entrance, and its chapter label rolls over from the previous label. On the first scene it simply means the card is there from the first frame. |
 
 Motion is fixed per template: fade-and-rise entrances (items staggered), the emphasis pulse, the
-gather, and a short fade at the end into the next scene's background colour (skipped when the next
-scene `continues` this one). Colours are QB's black, cream and orange. Text always stays inside
+gather, and a short fade at the end: to black before an uploaded asset or the end, or through the
+next graphic scene's own background (skipped when the next scene `continues` this one). The light
+ground's orange forms drift over the whole timeline, so they never jump at a cut. Colours are QB's black, cream and orange. Text always stays inside
 the frame's safe area; a scene with more words than its seconds allow gets a warning (about three words
 per second plus a settle-in second).
 
 `docs/examples/handoff-reel-plan.json` is a complete plan built from graphic scenes only.
-`docs/examples/style-test-plan.json` is the 10.4 s style test, fully faceless: hero → one ticket carried across three scenes (request arrives, note typed, action recorded, shift change), with captions timed to the owner's recording. It needs no uploads.
+`docs/examples/style-test-plan.json` is the 10.4 s style test, fully faceless: one ticket carried across three scenes (the request already sliding in at the first frame, MORNING landing as a label, note typed, action recorded, shift change with lights out), with captions timed to the owner's recording. It needs no uploads. `docs/examples/style-test-v2-baseline.json` is the earlier version kept as the agreed baseline (git tag `style-test-v2`).
 
 ## Where it goes
 

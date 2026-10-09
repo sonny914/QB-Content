@@ -282,6 +282,7 @@ describe('structured timeline with graphic scenes', () => {
     expect(await bad([{ seconds: 2, source: 'graphic', graphic: { template: 'device', media: 'asset' } }])).toMatch(/needs an uploaded image or clip for its device slot but only 0 were sent/)
     expect(await bad([{ seconds: 2, source: 'graphic', graphic: { template: 'device', media: 'none' } }])).toMatch(/device card needs an uploaded screenshot or recording/)
     expect(await bad([{ seconds: 2, source: 'graphic', graphic: { template: 'ticket', ticket: { title: 'x' }, disclaimer: '' } }])).toMatch(/disclaimer cannot be blank/)
+    expect(await bad([{ seconds: 2, source: 'graphic', graphic: { template: 'ticket', ticket: { title: 'x' }, disclaimer: 'Live demo' } }])).toMatch(/disclaimer must say the interface is an illustration/)
     expect(await bad([{ seconds: 2, source: 'graphic', graphic: { template: 'presenter', media: 'asset' } }])).toMatch(/needs an uploaded image or clip for its presenter slot/)
     expect(await bad([{ seconds: 0.5, source: 'graphic', graphic: { headline: 'A long enough headline to need reading time', support: 'and more words to read here' } }])).toBeNull()
   })

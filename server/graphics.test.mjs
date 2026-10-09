@@ -150,7 +150,7 @@ describe('frames', () => {
     const frame = renderGraphicFrame(spec, 1.5, 2, { image, w: media.w, h: media.h })
     // The card interior is the orange fixture; the caption shows the highlighted word; the label is there.
     expect(count(frame, isOrange, { x: card.x + 20, y: card.y + 20, w: card.w - 40, h: card.h - 40 })).toBeGreaterThan(card.w * card.h * 0.6)
-    expect(count(frame, (r, g, b) => r < 60 && g < 60 && b < 60, { x: 100, y: 1040, w: 520, h: 100 })).toBeGreaterThan(300) // caption text
+    expect(count(frame, (r, g, b) => r < 60 && g < 60 && b < 60, { x: 100, y: 960, w: 520, h: 100 })).toBeGreaterThan(300) // caption text, above the player's bottom overlay zone
     // A device card has nothing to show without a file: there is no placeholder mode.
     expect(() => validateGraphic({ template: 'device', media: 'none' })).toThrow(/device card needs an uploaded screenshot or recording/)
     expect(() => validateGraphic({ template: 'device', media: 'placeholder' })).toThrow(/media must be "asset"/)
@@ -163,7 +163,7 @@ describe('frames', () => {
     const first = renderGraphicFrame(spec, 1.0, 3)
     const second = renderGraphicFrame(spec, 2.0, 3)
     const middle = { x: 72, y: 300, w: 576, h: 600 }
-    const captionZone = { x: 100, y: 1040, w: 520, h: 110 }
+    const captionZone = { x: 100, y: 960, w: 520, h: 110 }
     expect(count(early, isLit, middle)).toBe(0) // nothing before the first cue
     expect(count(first, isOrange, middle)).toBeGreaterThan(2000) // "easy", large
     expect(count(first, isCream, middle)).toBeGreaterThan(4000) // the rest of the cue, large
@@ -180,26 +180,31 @@ describe('frames', () => {
     expect(() => validateGraphic({ template: 'device', zoom: { start: 2, end: 1 } })).toThrow(/zoom must be/)
     expect(() => validateGraphic({ template: 'presenter', captions: [{ start: 0, end: 1, text: '' }] })).toThrow(/captions\[0\].text is required/)
     expect(() => validateGraphic({ template: 'presenter', captions: [{ start: 1, end: 0.5, text: 'x' }] })).toThrow(/needs start and end seconds/)
-    expect(validateGraphic({ template: 'presenter' })).toMatchObject({ media: 'none', headline: '', theme: 'dark', land: 0.3, continues: false, ticket: null, events: [] })
+    expect(validateGraphic({ template: 'presenter' })).toMatchObject({ media: 'none', headline: '', theme: 'dark', land: null, continues: false, ticket: null, events: [] })
+    expect(validateGraphic({ template: 'hero', headline: 'x', land: 0.8 }).land).toBe(0.8)
     expect(validateGraphic({ template: 'device' })).toMatchObject({ media: 'asset' })
   })
 
   describe('ticket: a fictional request interface driven by events', () => {
     const ticket = { title: 'Leak under the kitchen sink', meta: 'Unit 4B · Reported by resident', time: '7:42 AM' }
-    const interior = { x: 170, y: 180, w: 380, h: 780 }
-    const block = { x: 200, y: 330, w: 320, h: 210 } // the request block's area inside the card, status chip included
-    const isGrey = (r, g, b) => Math.abs(r - 140) < 14 && Math.abs(g - 138) < 14 && Math.abs(b - 133) < 14
+    const interior = { x: 170, y: 180, w: 380, h: 700 }
+    const block = { x: 200, y: 300, w: 320, h: 230 } // the request block's area inside the card, status chip included
+    const isDimInk = (r, g, b) => r > 80 && r < 130 && g > 80 && g < 130 && b > 75 && b < 125 // inkDim composited on cream
     const isUiBg = (r, g, b) => r > 10 && r < 26 && g > 10 && g < 26 && b > 10 && b < 26
 
     it('validates the ticket, its events and the fiction label', () => {
       const spec = validateGraphic({ template: 'ticket', ticket, events: [{ type: 'request', at: 0.7 }, { type: 'note', text: 'Logged.', by: 'Day shift', time: '7:51 AM' }] })
-      expect(spec.ticket).toEqual({ ...ticket, status: 'Open', shift: 'Day shift', app: 'Requests' })
-      expect(spec.events).toEqual([{ type: 'request', at: 0.7, text: '', by: '', time: '' }, { type: 'note', at: null, text: 'Logged.', by: 'Day shift', time: '7:51 AM' }])
+      expect(spec.ticket).toEqual({ ...ticket, status: 'Open', shift: 'Day shift', app: 'Requests', subtitle: '', empty: 'Nothing open', handover: 'Shift change' })
+      expect(spec.events).toEqual([{ type: 'request', at: 0.7, text: 'Request opened', by: '', time: '' }, { type: 'note', at: null, text: 'Logged.', by: 'Day shift', time: '7:51 AM' }])
       expect(spec.disclaimer).toBe('Illustration · not a real app')
       expect(spec.headline).toBe('') // optional here
+      expect(validateGraphic({ template: 'ticket', ticket: { ...ticket, subtitle: 'Orders', empty: 'No open orders', handover: 'Owner change' } }).ticket).toMatchObject({ subtitle: 'Orders', empty: 'No open orders', handover: 'Owner change' })
       expect(() => validateGraphic({ template: 'ticket' })).toThrow(/ticket must be an object with at least a title/)
       expect(() => validateGraphic({ template: 'ticket', ticket: { meta: 'x' } })).toThrow(/ticket.title is required/)
       expect(() => validateGraphic({ template: 'ticket', ticket, disclaimer: '  ' })).toThrow(/disclaimer cannot be blank/)
+      // The label must declare the fiction: a product name or "Live demo" is rejected.
+      for (const bad of ['Live demo', 'Requests by Quiet Bands', 'Real customer data']) expect(() => validateGraphic({ template: 'ticket', ticket, disclaimer: bad })).toThrow(/disclaimer must say the interface is an illustration/)
+      for (const ok of ['Mock-up only', 'Fictional example', 'Sample screen, not real data']) expect(validateGraphic({ template: 'ticket', ticket, disclaimer: ok }).disclaimer).toBe(ok)
       expect(() => validateGraphic({ template: 'ticket', ticket, events: [{ type: 'alarm' }] })).toThrow(/events\[0\].type must be one of request, note, action, shift/)
       expect(() => validateGraphic({ template: 'ticket', ticket, events: [{ type: 'note', at: -1, text: 'x' }] })).toThrow(/events\[0\].at must be a time/)
       expect(() => validateGraphic({ template: 'ticket', ticket, events: [{ type: 'shift' }] })).toThrow(/events\[0\].text is required for a shift event/)
@@ -215,7 +220,7 @@ describe('frames', () => {
       expect(count(before, isOrange, block)).toBe(0) // no NEW chip or status chip yet
       expect(count(after, isOrange, block)).toBeGreaterThan(400)
       expect(count(after, isCream, block)).toBeGreaterThan(count(before, isCream, block) + 1500) // the title text
-      for (const frame of [before, after]) expect(count(frame, isGrey, { x: 160, y: 985, w: 400, h: 40 })).toBeGreaterThan(150) // "ILLUSTRATION · NOT A REAL APP"
+      for (const frame of [before, after]) expect(count(frame, isDimInk, { x: 100, y: 895, w: 520, h: 40 })).toBeGreaterThan(300) // "ILLUSTRATION · NOT A REAL APP" in the theme's dim ink
     })
 
     it('a note types in, an action draws its check, and a shift change turns the lights out while the request stays lit', () => {
@@ -231,11 +236,18 @@ describe('frames', () => {
       const ring = count(renderGraphicFrame(acted, 0.35, 2), isOrange, interior)
       const check = count(renderGraphicFrame(acted, 1.2, 2), isOrange, interior)
       expect(check).toBeGreaterThan(ring + 150) // the circle and tick finish drawing
+      // The ring must not vanish on the frame it completes (ring reaches 1 at 0.65 s here).
+      const justBefore = count(renderGraphicFrame(acted, 0.64, 2), isOrange, interior)
+      const complete = count(renderGraphicFrame(acted, 0.66, 2), isOrange, interior)
+      expect(complete).toBeGreaterThan(justBefore - 80)
+      // The header is pinned: the shift chip stays in the same place however far the view pushes in.
+      const chipZone = { x: 420, y: 220, w: 130, h: 50 }
+      expect(count(renderGraphicFrame(noted, 1.8, 2), isOrange, chipZone)).toBe(count(renderGraphicFrame(validateGraphic(base), 1.8, 2), isOrange, chipZone))
 
       const handed = validateGraphic({ ...base, events: [{ type: 'request' }, { type: 'shift', at: 1.0, text: 'Night shift', time: '3:00 PM' }] })
       const day = renderGraphicFrame(handed, 0.8, 3)
       const night = renderGraphicFrame(handed, 2.4, 3)
-      const margin = { x: 0, y: 500, w: 100, h: 300 } // left of the card: background only
+      const margin = { x: 0, y: 450, w: 100, h: 300 } // left of the card: background only
       expect(count(day, isCream, margin)).toBeGreaterThan(20_000)
       expect(count(night, isCream, margin)).toBe(0) // lights out
       expect(count(night, isLit, margin)).toBe(0)
@@ -248,14 +260,34 @@ describe('frames', () => {
       const carried = validateGraphic({ template: 'ticket', theme: 'light', ticket, events: [{ type: 'request' }], continues: true })
       expect(count(renderGraphicFrame(spec, 0, 2), isUiBg, interior)).toBe(0) // the card is still rising in
       expect(count(renderGraphicFrame(carried, 0, 2), isUiBg, interior)).toBeGreaterThan(50_000) // already there
-      const { fadeColorBefore, PALETTE } = graphicsModule
+      const { fadeColorBefore } = graphicsModule
       expect(fadeColorBefore(carried)).toBeNull()
-      expect(fadeColorBefore(spec)).toBe(PALETTE.cream)
-      expect(fadeColorBefore(validateGraphic({ headline: 'x' }))).toBe(PALETTE.black)
-      expect(fadeColorBefore(null)).toBe(PALETTE.black)
+      expect(fadeColorBefore(spec)).toBe('light')
+      expect(fadeColorBefore(validateGraphic({ headline: 'x' }))).toBe('dark')
+      expect(fadeColorBefore(null)).toBe('black')
       const lastFrame = (fadeTo) => count(renderGraphicFrame(spec, 1.99, 2, null, { fadeTo }), isLit)
-      expect(lastFrame(null)).toBeGreaterThan(lastFrame(PALETTE.black) + 100_000) // a hard cut keeps the picture to the last frame
-      expect(count(renderGraphicFrame(spec, 1.99, 2, null, { fadeTo: PALETTE.cream }), isCream, { x: 0, y: 0, w: 60, h: 200 })).toBeGreaterThan(10_000) // fading into cream, not black
+      expect(lastFrame(null)).toBeGreaterThan(lastFrame('black') + 100_000) // a hard cut keeps the picture to the last frame
+      // Fading through the next light scene's background keeps the cream ground and its orange form; the card dissolves.
+      const faded = renderGraphicFrame(spec, 1.99, 2, null, { fadeTo: 'light' })
+      expect(count(faded, isCream, { x: 0, y: 0, w: 60, h: 200 })).toBeGreaterThan(10_000)
+      expect(count(faded, isOrange, { x: 560, y: 0, w: 160, h: 160 })).toBeGreaterThan(5_000)
+      expect(count(faded, isUiBg, interior)).toBeLessThan(2_000)
+      // The ground's forms drift over the whole run, so two scenes at the same absolute time match exactly.
+      const a = renderGraphicFrame(spec, 1.5, 2, null, { offset: 3, total: 10 })
+      const b = renderGraphicFrame(carried, 0.5, 2, null, { offset: 4, total: 10 })
+      expect(count(a, isOrange, { x: 560, y: 0, w: 160, h: 160 })).toBe(count(b, isOrange, { x: 560, y: 0, w: 160, h: 160 }))
+      // The chapter label rolls over from the previous scene's label.
+      const rolled = validateGraphic({ template: 'ticket', theme: 'light', label: 'Day shift', ticket, events: [{ type: 'request' }], continues: true })
+      const at0 = renderGraphicFrame(rolled, 0, 2, null, { labelFrom: 'Morning' })
+      const at1 = renderGraphicFrame(rolled, 1, 2, null, { labelFrom: 'Morning' })
+      const labelZone = { x: 160, y: 100, w: 400, h: 44 }
+      expect(count(at0, isOrange, labelZone)).toBeGreaterThan(200) // "MORNING" still there at the cut
+      expect(count(at1, isOrange, labelZone)).toBeGreaterThan(200) // "DAY SHIFT" once rolled
+      const a0 = at0.getContext('2d').getImageData(160, 100, 400, 44).data
+      const a1 = at1.getContext('2d').getImageData(160, 100, 400, 44).data
+      let diff = 0
+      for (let i = 0; i < a0.length; i += 4) if (Math.abs(a0[i + 1] - a1[i + 1]) > 60) diff++ // green separates orange from cream
+      expect(diff).toBeGreaterThan(300)
     })
   })
 

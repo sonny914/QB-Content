@@ -105,8 +105,12 @@ export async function plan({ voiceover, assets, timeline, jobDir }) {
 
   const items = []
   const notes = []
+  const total = round(timeline.reduce((a, e) => a + e.seconds, 0))
+  let offset = 0
   for (const [i, entry] of timeline.entries()) {
     const seconds = entry.seconds
+    const start = offset
+    offset = round(offset + seconds)
     if (entry.source === 'graphic') {
       const g = entry.graphic
       const need = readingSeconds(g)
@@ -117,7 +121,10 @@ export async function plan({ voiceover, assets, timeline, jobDir }) {
       // The scene's end fade matches the next scene's background, or is skipped when that scene continues this one.
       const next = timeline[i + 1]
       const fadeTo = fadeColorBefore(next && next.source === 'graphic' ? next.graphic : null)
-      const item = { index: i, name: `graphic: ${g.headline || g.ticket?.title || g.template}`, path: `${jobDir}/graphic-${i}.mp4`, kind: 'video', seconds, sourceDuration: seconds, hold: 0, graphic: g, mediaAsset: null, fadeTo }
+      // A continuing scene rolls its chapter label over from the previous graphic's label.
+      const prev = timeline[i - 1]
+      const labelFrom = g.continues && prev && prev.source === 'graphic' && prev.graphic.label !== g.label ? prev.graphic.label : null
+      const item = { index: i, name: `graphic: ${g.headline || g.ticket?.title || g.template}`, path: `${jobDir}/graphic-${i}.mp4`, kind: 'video', seconds, sourceDuration: seconds, hold: 0, graphic: g, mediaAsset: null, fadeTo, labelFrom, offset: start, total }
       if (entry.assetIndex !== undefined) {
         const asset = assets[entry.assetIndex]
         const info = await probe(asset.path).catch((err) => {
@@ -144,7 +151,6 @@ export async function plan({ voiceover, assets, timeline, jobDir }) {
     items.push(item)
   }
 
-  const total = round(timeline.reduce((a, e) => a + e.seconds, 0))
   if (!voiceover) notes.push('Silent preview: no voiceover was attached, so the audio track is silence.')
   else {
     if (total < voiceDuration - 0.05) notes.push(`The timeline (${total}s) is shorter than the voiceover (${voiceDuration}s): the narration is cut off at ${total}s.`)
@@ -219,6 +225,9 @@ export async function render({ items, total, voiceover, output, format, onProgre
       output: item.path,
       media,
       fadeTo: item.fadeTo,
+      labelFrom: item.labelFrom,
+      offset: item.offset,
+      total: item.total,
       signal,
       onProgress: (p) => onProgress && onProgress(((drawn + p * item.seconds) / graphicSeconds) * drawShare),
     })

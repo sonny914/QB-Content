@@ -33,11 +33,13 @@ export const EVENT_TYPES = ['request', 'note', 'action', 'shift'] as const
 export type TicketEventType = (typeof EVENT_TYPES)[number]
 export const GRAPHIC_LIMITS = {
   headline: 90, support: 160, label: 24, items: 4, itemLabel: 20, itemText: 60, captions: 12, caption: 80,
-  ticketTitle: 44, ticketMeta: 60, ticketTime: 12, ticketStatus: 16, ticketShift: 20, ticketApp: 24,
+  ticketTitle: 44, ticketMeta: 60, ticketTime: 12, ticketStatus: 16, ticketShift: 20, ticketApp: 24, ticketSubtitle: 24, ticketEmpty: 32, ticketHandover: 24,
   events: 6, eventText: 70, eventBy: 20, disclaimer: 48,
 }
 /** Drawn on every frame of a ticket scene unless the plan supplies other wording. It cannot be blank. */
 export const DEFAULT_DISCLAIMER = 'Illustration · not a real app'
+/** The label has to declare the fiction in some words; "Live demo" or a product name would not do. */
+export const DISCLAIMER_WORDS = /illustrat|fiction|mock|not a real|not real|example|simulat|sample/i
 
 export interface GraphicItem {
   label: string
@@ -60,6 +62,10 @@ export interface TicketSpec {
   status: string
   shift: string
   app: string
+  /** Wording, so the template serves any queue of tracked items: header subtitle, empty state, handover row. */
+  subtitle: string
+  empty: string
+  handover: string
 }
 
 /** One thing that happens to the ticket. `at` in seconds from the scene start; null = already happened. */
@@ -71,7 +77,7 @@ export interface TicketEvent {
   time: string
 }
 
-export const EMPTY_TICKET: TicketSpec = { title: '', meta: '', time: '', status: 'Open', shift: 'Day shift', app: 'Requests' }
+export const EMPTY_TICKET: TicketSpec = { title: '', meta: '', time: '', status: 'Open', shift: 'Day shift', app: 'Requests', subtitle: '', empty: 'Nothing open', handover: 'Shift change' }
 
 /** A motion-graphic scene the local renderer draws itself. Only these properties are understood. */
 export interface GraphicSpec {
@@ -94,8 +100,8 @@ export interface GraphicSpec {
   /** Region of the media (fractions) the device or presenter pushes into. */
   focus: { x: number; y: number; w: number; h: number } | null
   zoom: { start: number; end: number } | null
-  /** hero: when the headline lands and when the support line takes over, in seconds. */
-  land: number
+  /** hero: when the headline lands (default 0.3) and when the support line takes over. ticket: when the label lands. */
+  land: number | null
   beat: number | null
   captions: CaptionCue[]
   /** ticket only: the fictional request, what happens to it, and the on-screen fiction label. */
@@ -130,7 +136,7 @@ export const EMPTY_GRAPHIC: GraphicSpec = {
   frame: 'auto',
   focus: null,
   zoom: null,
-  land: 0.3,
+  land: null,
   beat: null,
   captions: [],
   ticket: null,
@@ -218,7 +224,7 @@ export function validateGraphic(raw: unknown, where: string): { ok: true; spec: 
     if (zs === null || ze === null || zs < 0 || ze <= zs) errors.push(`${where}.zoom must be { start, end } seconds with end after start.`)
     else zoom = { start: zs, end: ze }
   }
-  let land = 0.3
+  let land: number | null = null
   if (raw.land !== undefined && raw.land !== null) {
     const l = n(raw.land)
     if (l === null || l < 0) errors.push(`${where}.land must be a time in seconds.`)
@@ -270,6 +276,9 @@ export function validateGraphic(raw: unknown, where: string): { ok: true; spec: 
         status: field('status', GRAPHIC_LIMITS.ticketStatus, 'Open'),
         shift: field('shift', GRAPHIC_LIMITS.ticketShift, 'Day shift'),
         app: field('app', GRAPHIC_LIMITS.ticketApp, 'Requests'),
+        subtitle: field('subtitle', GRAPHIC_LIMITS.ticketSubtitle),
+        empty: field('empty', GRAPHIC_LIMITS.ticketEmpty, 'Nothing open'),
+        handover: field('handover', GRAPHIC_LIMITS.ticketHandover, 'Shift change'),
       }
       if (!ticket.title) errors.push(`${where}.ticket.title is required.`)
     }
@@ -296,7 +305,7 @@ export function validateGraphic(raw: unknown, where: string): { ok: true; spec: 
           if (by.length > GRAPHIC_LIMITS.eventBy) errors.push(`${where}.events[${i}].by must be ${GRAPHIC_LIMITS.eventBy} characters or fewer.`)
           if (time.length > GRAPHIC_LIMITS.ticketTime) errors.push(`${where}.events[${i}].time must be ${GRAPHIC_LIMITS.ticketTime} characters or fewer.`)
           if (type && type !== 'request' && !text) errors.push(`${where}.events[${i}].text is required for a ${type} event.`)
-          if (type) events.push({ type, at, text, by, time })
+          if (type) events.push({ type, at, text: type === 'request' && !text ? 'Request opened' : text, by, time })
         })
       }
     }
@@ -304,6 +313,7 @@ export function validateGraphic(raw: unknown, where: string): { ok: true; spec: 
       disclaimer = s(raw.disclaimer)
       if (!disclaimer) errors.push(`${where}.disclaimer cannot be blank: a fictional interface must say so on screen.`)
       else if (disclaimer.length > GRAPHIC_LIMITS.disclaimer) errors.push(`${where}.disclaimer must be ${GRAPHIC_LIMITS.disclaimer} characters or fewer.`)
+      else if (!DISCLAIMER_WORDS.test(disclaimer)) errors.push(`${where}.disclaimer must say the interface is an illustration, e.g. "${DEFAULT_DISCLAIMER}".`)
     }
   }
   const continues = raw.continues === true
@@ -333,8 +343,9 @@ export function normaliseScene(scene: Partial<PlanScene> & { id: string; narrati
     const media = graphic.media as string
     if (media === 'placeholder' || (graphic.template === 'presenter' && media !== 'asset')) graphic = { ...graphic, media: 'none' }
     if (graphic.template === 'device') graphic = { ...graphic, media: 'asset' }
-    if (graphic.template === 'ticket' && !graphic.ticket) graphic = { ...graphic, ticket: { ...EMPTY_TICKET } }
+    if (graphic.template === 'ticket') graphic = { ...graphic, ticket: { ...EMPTY_TICKET, ...(graphic.ticket ?? {}) } }
     if (!graphic.disclaimer) graphic = { ...graphic, disclaimer: DEFAULT_DISCLAIMER }
+    if (graphic.land !== null && typeof graphic.land !== 'number') graphic = { ...graphic, land: null }
   }
   return { id: scene.id, narration: scene.narration, visual: scene.visual, seconds: scene.seconds, kind, graphic }
 }
