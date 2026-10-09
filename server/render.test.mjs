@@ -236,6 +236,29 @@ describe('structured timeline with graphic scenes', () => {
     expect(c.every((v) => v > 200)).toBe(true) // cream last
   })
 
+  it('renders device and presenter graphics with uploaded media and timed captions', async () => {
+    const timeline = [
+      { seconds: 1.5, source: 'graphic', graphic: { template: 'hero', theme: 'light', headline: 'Morning.', accent: 'Morning.', land: 0.3 } },
+      { seconds: 2, source: 'graphic', graphic: { template: 'device', theme: 'light', label: 'Day shift', media: 'asset', frame: 'phone', focus: { x: 0.5, y: 0.5, w: 0.4, h: 0.4 }, zoom: { start: 0.3, end: 1.2 }, captions: [{ start: 0.1, end: 1.9, text: 'Day shift logs it,', highlight: 'logs' }] } },
+      { seconds: 1.5, source: 'graphic', graphic: { template: 'presenter', media: 'asset', captions: [{ start: 0.1, end: 1.4, text: 'clocks out.' }] } },
+      { seconds: 1, source: 'graphic', graphic: { template: 'presenter', media: 'placeholder' } },
+    ]
+    const { status, body } = await submit({ assets: [fx.orange, fx.clip], timeline })
+    expect(status).toBe(202)
+    const job = await waitFor(body.id)
+    expect(job.error).toBeNull()
+    expect(job.output).toMatchObject({ timeline: 6, graphicCount: 4, assetCount: 4, silent: false })
+    const res = await fetch(`${base}/api/renders/${body.id}/output`)
+    const out = path.join(scratch, 'media-graphics.mp4')
+    await (await import('node:fs/promises')).writeFile(out, Buffer.from(await res.arrayBuffer()))
+    const [hero, device, presenter] = await Promise.all([meanColorAt(out, 1.0), meanColorAt(out, 2.5), meanColorAt(out, 4.2)])
+    expect(hero[0]).toBeGreaterThan(200) // orange "Morning." fills the centre of the cream frame
+    expect(device[0]).toBeGreaterThan(200) // the frame centre is the card, showing the orange fixture
+    expect(device[2]).toBeLessThan(80)
+    expect(presenter[2]).toBeGreaterThan(150) // the blue clip fills the presenter slot
+    expect(presenter[0]).toBeLessThan(90)
+  })
+
   it('reports timeline problems before rendering', async () => {
     const bad = async (timeline, assets = []) => {
       const { body, status } = await submit({ assets, timeline })
@@ -246,6 +269,7 @@ describe('structured timeline with graphic scenes', () => {
     expect(await bad([{ seconds: 2, source: 'graphic', graphic: { template: 'card' } }])).toMatch(/Scene 1 graphic.headline is required/)
     expect(await bad([{ seconds: 2, source: 'graphic', graphic: { headline: 'x' } }], [fx.orange])).toMatch(/1 asset sent but the timeline uses 0/)
     expect(await bad([{ seconds: 2, source: 'hologram' }])).toMatch(/unknown source "hologram"/)
+    expect(await bad([{ seconds: 2, source: 'graphic', graphic: { template: 'device', media: 'asset' } }])).toMatch(/needs an uploaded image or clip for its device slot but only 0 were sent/)
     expect(await bad([{ seconds: 0.5, source: 'graphic', graphic: { headline: 'A long enough headline to need reading time', support: 'and more words to read here' } }])).toBeNull()
   })
 

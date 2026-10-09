@@ -112,7 +112,7 @@ export class JobStore {
       job.message = 'Preview ready'
       // The uploaded sources are no longer needed; keep only the rendered file.
       await Promise.all([voiceover, ...assets].filter(Boolean).map((f) => rm(f.path, { force: true })))
-      await Promise.all(p.items.filter((it) => it.graphic).map((it) => rm(it.path, { force: true })))
+      await Promise.all(p.items.filter((it) => it.graphic).flatMap((it) => [rm(it.path, { force: true }), rm(`${it.path}.frames`, { recursive: true, force: true })]))
     } catch (err) {
       job.status = 'failed'
       job.error = err.message

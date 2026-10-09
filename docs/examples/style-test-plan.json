@@ -1,0 +1,57 @@
+{
+  "format": "qb-content-plan",
+  "version": 1,
+  "hooks": ["Morning. A resident reports a leak under the sink."],
+  "recommendedHook": 0,
+  "script": "Morning. A resident reports a leak under the sink. Day shift logs it, tries the easy fix, clocks out.",
+  "scenes": [
+    {
+      "narration": "Morning. A resident reports a leak under the sink.",
+      "visual": "Oversized type on cream: MORNING. lands as it is spoken, then shrinks up as the second line punches in.",
+      "seconds": 5.1,
+      "kind": "graphic",
+      "graphic": {
+        "template": "hero",
+        "theme": "light",
+        "label": "Property teams",
+        "headline": "Morning.",
+        "accent": "Morning. leak",
+        "land": 0.8,
+        "support": "A leak under the sink.",
+        "beat": 2.0
+      }
+    },
+    {
+      "narration": "Day shift logs it,",
+      "visual": "The QB site recording on a floating phone card; the card pushes into the crack as the line lands.",
+      "seconds": 2.5,
+      "kind": "graphic",
+      "graphic": {
+        "template": "device",
+        "theme": "light",
+        "label": "Day shift",
+        "media": "asset",
+        "frame": "phone",
+        "focus": { "x": 0.28, "y": 0.34, "w": 0.46, "h": 0.3 },
+        "zoom": { "start": 0.9, "end": 2.2 },
+        "captions": [{ "start": 0.2, "end": 2.4, "text": "Day shift logs it,", "highlight": "logs" }]
+      }
+    },
+    {
+      "narration": "tries the easy fix, clocks out.",
+      "visual": "Presenter to camera on the dark set with two timed captions. Slot shown as not supplied until a clip exists.",
+      "seconds": 2.8,
+      "kind": "graphic",
+      "graphic": {
+        "template": "presenter",
+        "theme": "dark",
+        "media": "placeholder",
+        "captions": [
+          { "start": 0.25, "end": 1.45, "text": "tries the easy fix,", "highlight": "easy" },
+          { "start": 1.45, "end": 2.65, "text": "clocks out.", "highlight": "out." }
+        ]
+      }
+    }
+  ],
+  "claimsToVerify": []
+}

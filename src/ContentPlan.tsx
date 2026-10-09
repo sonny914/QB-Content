@@ -5,9 +5,12 @@ import {
   GRAPHIC_LIMITS,
   GRAPHIC_TEMPLATES,
   MAX_SECONDS,
+  MEDIA_TEMPLATES,
   MIN_SECONDS,
   PLAN_INPUT_FIELDS,
+  graphicNeedsAsset,
   graphicReadingSeconds,
+  type CaptionCue,
   parsePlan,
   planSummary,
   scaleScenes,
@@ -28,6 +31,9 @@ const TEMPLATE_HELP: Record<GraphicSpec['template'], string> = {
   card: 'A labelled card; items enter one by one.',
   notes: 'Separate notes scattered across the frame; optionally gathering into one card.',
   question: 'A closing question with an orange rule.',
+  hero: 'Oversized type: the headline lands, then shrinks up as the support line punches in.',
+  device: 'An uploaded screenshot or recording on a floating device card, with optional push-in and captions.',
+  presenter: 'An uploaded clip of you to camera, full frame, with timed captions.',
 }
 
 interface Props {
@@ -48,7 +54,11 @@ export function arrangementFingerprint(
   const byId = new Map(library.map((a) => [a.id, a]))
   return JSON.stringify({
     voice: fileKey(voice),
-    scenes: scenes.map((s) => [s.id, s.seconds, s.kind === 'graphic' ? 'graphic' : fileKey(byId.get(assignments[s.id] ?? -1)?.file ?? null)]),
+    scenes: scenes.map((s) => [
+      s.id,
+      s.seconds,
+      s.kind === 'graphic' && !graphicNeedsAsset(s.graphic) ? 'graphic' : fileKey(byId.get(assignments[s.id] ?? -1)?.file ?? null),
+    ]),
   })
 }
 
@@ -165,6 +175,11 @@ export default function ContentPlan({ plan, dispatch, health, onRendered }: Prop
     const timeline: TimelineEntry[] = []
     for (const s of scenes) {
       if (s.kind === 'graphic' && s.graphic) {
+        if (graphicNeedsAsset(s.graphic)) {
+          const asset = byId.get(assignments[s.id] ?? -1)
+          if (!asset) return
+          assets.push(asset.file)
+        }
         timeline.push({ seconds: s.seconds, source: 'graphic', graphic: s.graphic })
       } else {
         const asset = byId.get(assignments[s.id] ?? -1)
@@ -179,9 +194,10 @@ export default function ContentPlan({ plan, dispatch, health, onRendered }: Prop
 
   const timeline = totalSeconds(scenes)
   const voiceDuration = voice?.duration ?? null
-  const assetScenes = scenes.filter((s) => s.kind !== 'graphic')
+  // Scenes that need an uploaded file: asset scenes, plus device/presenter graphics set to "asset".
+  const assetScenes = scenes.filter((s) => s.kind !== 'graphic' || graphicNeedsAsset(s.graphic))
   const unassigned = assetScenes.filter((s) => assignments[s.id] === undefined || !library.some((a) => a.id === assignments[s.id]))
-  const graphicProblems = scenes.flatMap((s, i) => (s.kind === 'graphic' && !(s.graphic?.headline ?? '').trim() ? [i + 1] : []))
+  const graphicProblems = scenes.flatMap((s, i) => (s.kind === 'graphic' && !MEDIA_TEMPLATES.includes(s.graphic?.template ?? 'title') && !(s.graphic?.headline ?? '').trim() ? [i + 1] : []))
   const canCreate = Boolean(imported && unassigned.length === 0 && graphicProblems.length === 0 && serviceReady(health) && !busy)
   const byId = new Map(library.map((a) => [a.id, a]))
 
@@ -376,9 +392,33 @@ export default function ContentPlan({ plan, dispatch, health, onRendered }: Prop
             <ol className="scenes" data-testid="scenes">
               {scenes.map((s, i) => {
                 const asset = byId.get(assignments[s.id] ?? -1)
-                const short = s.kind !== 'graphic' && asset?.kind === 'video' && asset.sourceDuration !== null && asset.sourceDuration < s.seconds - 0.05
                 const g = s.graphic ?? EMPTY_GRAPHIC
-                const readNeed = s.kind === 'graphic' ? graphicReadingSeconds(g) : 0
+                const needsAsset = s.kind !== 'graphic' || graphicNeedsAsset(g)
+                const short = needsAsset && asset?.kind === 'video' && asset.sourceDuration !== null && asset.sourceDuration < s.seconds - 0.05
+                const isMedia = s.kind === 'graphic' && MEDIA_TEMPLATES.includes(g.template)
+                const readNeed = s.kind === 'graphic' && !isMedia ? graphicReadingSeconds(g) : 0
+                const assetPicker = (
+                  <label className="scene-field">
+                    <span className="field-label">{isMedia ? `${g.template === 'presenter' ? 'Your clip to camera' : 'Screenshot or recording'} for this scene` : 'Asset for this scene'}</span>
+                    <div className="row">
+                      {asset && (asset.kind === 'image' ? <img className="thumb thumb-sm" src={asset.url} alt="" /> : <video className="thumb thumb-sm" src={asset.url} muted playsInline preload="metadata" />)}
+                      <select
+                        value={assignments[s.id] ?? ''}
+                        aria-label={`Asset for scene ${i + 1}`}
+                        disabled={busy || library.length === 0}
+                        onChange={(e) => setAssignments((map) => ({ ...map, [s.id]: e.target.value === '' ? undefined : Number(e.target.value) }))}
+                      >
+                        <option value="">{library.length === 0 ? 'Add images or clips first' : 'Choose an asset'}</option>
+                        {library.map((a, j) => (
+                          <option key={a.id} value={a.id}>
+                            {j + 1}. {a.file.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </label>
+                )
+                const setCaptions = (captions: CaptionCue[], commitNow = false) => setGraphic(i, { captions }, commitNow)
                 return (
                   <li key={s.id} className="scene" data-testid="scene">
                     <div className="scene-head">
@@ -450,14 +490,92 @@ export default function ContentPlan({ plan, dispatch, health, onRendered }: Prop
                         </label>
                         <div className="row">
                           <label className="scene-field grow">
+                            <span className="field-label">Theme</span>
+                            <select value={g.theme} aria-label={`Theme for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { theme: e.target.value as GraphicSpec['theme'] }, true)}>
+                              <option value="dark">Dark (black, cream type)</option>
+                              <option value="light">Light (cream grid, black type)</option>
+                            </select>
+                          </label>
+                          <label className="scene-field grow">
                             <span className="field-label">Label (small caps)</span>
                             <input type="text" value={g.label} maxLength={GRAPHIC_LIMITS.label} aria-label={`Label for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { label: e.target.value })} onBlur={commit} placeholder="e.g. Morning" />
                           </label>
                         </div>
+                        {isMedia && (
+                          <div className="row">
+                            <label className="scene-field grow">
+                              <span className="field-label">Media</span>
+                              <select value={g.media} aria-label={`Media for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { media: e.target.value as GraphicSpec['media'] }, true)}>
+                                <option value="asset">An uploaded {g.template === 'presenter' ? 'clip of you' : 'screenshot or recording'}</option>
+                                <option value="placeholder">Placeholder (labelled empty slot)</option>
+                              </select>
+                            </label>
+                            {g.template === 'device' && (
+                              <label className="scene-field">
+                                <span className="field-label">Card</span>
+                                <select value={g.frame} aria-label={`Frame for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { frame: e.target.value as GraphicSpec['frame'] }, true)}>
+                                  <option value="auto">Auto</option>
+                                  <option value="phone">Phone</option>
+                                  <option value="desktop">Desktop</option>
+                                </select>
+                              </label>
+                            )}
+                          </div>
+                        )}
                         <label className="scene-field">
-                          <span className="field-label">Headline (required, {GRAPHIC_LIMITS.headline} characters max)</span>
+                          <span className="field-label">{isMedia ? 'Headline (optional)' : `Headline (required, ${GRAPHIC_LIMITS.headline} characters max)`}</span>
                           <input type="text" value={g.headline} maxLength={GRAPHIC_LIMITS.headline} aria-label={`Headline for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { headline: e.target.value })} onBlur={commit} />
                         </label>
+                        <div className="row">
+                          <label className="scene-field grow">
+                            <span className="field-label">Orange words (space separated)</span>
+                            <input type="text" value={g.accent} aria-label={`Orange words for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { accent: e.target.value })} onBlur={commit} placeholder="e.g. leak" />
+                          </label>
+                          {g.template === 'hero' && (
+                            <>
+                              <label className="seconds">
+                                <span className="field-label">Lands at</span>
+                                <input type="number" min={0} max={MAX_SECONDS} step={0.1} value={g.land} aria-label={`Headline lands at for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { land: Math.max(0, Number(e.target.value)) })} onBlur={commit} />
+                                <span>s</span>
+                              </label>
+                              <label className="seconds">
+                                <span className="field-label">Second line at</span>
+                                <input type="number" min={0} max={MAX_SECONDS} step={0.1} value={g.beat ?? ''} aria-label={`Second line at for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { beat: e.target.value === '' ? null : Math.max(0, Number(e.target.value)) })} onBlur={commit} placeholder="mid" />
+                                <span>s</span>
+                              </label>
+                            </>
+                          )}
+                        </div>
+                        {isMedia && (
+                          <div className="row">
+                            <label className="scene-field grow">
+                              <span className="field-label">Push into (x, y, width, height as fractions 0–1; blank for none)</span>
+                              <input
+                                type="text"
+                                value={g.focus ? `${g.focus.x}, ${g.focus.y}, ${g.focus.w}, ${g.focus.h}` : ''}
+                                aria-label={`Push into for scene ${i + 1}`}
+                                disabled={busy}
+                                placeholder="e.g. 0.3, 0.35, 0.45, 0.3"
+                                onChange={(e) => {
+                                  const v = e.target.value.split(',').map((x) => Number(x.trim()))
+                                  const ok = v.length === 4 && v.every((n) => Number.isFinite(n) && n >= 0 && n <= 1) && v[2] > 0 && v[3] > 0 && v[0] + v[2] <= 1 && v[1] + v[3] <= 1
+                                  setGraphic(i, { focus: e.target.value.trim() === '' ? null : ok ? { x: v[0], y: v[1], w: v[2], h: v[3] } : g.focus })
+                                }}
+                                onBlur={commit}
+                              />
+                            </label>
+                            <label className="seconds">
+                              <span className="field-label">Push from</span>
+                              <input type="number" min={0} step={0.1} value={g.zoom?.start ?? ''} aria-label={`Push start for scene ${i + 1}`} disabled={busy} placeholder="0.4" onChange={(e) => setGraphic(i, { zoom: e.target.value === '' ? null : { start: Math.max(0, Number(e.target.value)), end: Math.max(Number(e.target.value) + 0.1, g.zoom?.end ?? Number(e.target.value) + 1.2) } })} onBlur={commit} />
+                              <span>s</span>
+                            </label>
+                            <label className="seconds">
+                              <span className="field-label">to</span>
+                              <input type="number" min={0} step={0.1} value={g.zoom?.end ?? ''} aria-label={`Push end for scene ${i + 1}`} disabled={busy} placeholder="1.6" onChange={(e) => setGraphic(i, { zoom: e.target.value === '' ? null : { start: g.zoom?.start ?? 0, end: Math.max((g.zoom?.start ?? 0) + 0.1, Number(e.target.value)) } })} onBlur={commit} />
+                              <span>s</span>
+                            </label>
+                          </div>
+                        )}
                         <label className="scene-field">
                           <span className="field-label">Supporting text (optional)</span>
                           <textarea rows={2} value={g.support} maxLength={GRAPHIC_LIMITS.support} aria-label={`Supporting text for scene ${i + 1}`} disabled={busy} onChange={(e) => setGraphic(i, { support: e.target.value })} onBlur={commit} />
@@ -504,30 +622,34 @@ export default function ContentPlan({ plan, dispatch, health, onRendered }: Prop
                             </label>
                           )}
                         </div>
-                        <p className={readNeed > s.seconds + 0.05 ? 'warn-line' : 'status-meta'} data-testid="reading-time">
-                          About {readNeed}s to read{readNeed > s.seconds + 0.05 ? `, but the scene is ${s.seconds}s. Give it more time or fewer words.` : ` · scene is ${s.seconds}s.`}
-                        </p>
+                        <div className="scene-field">
+                          <span className="field-label">Captions (seconds from the start of this scene; timed by you, not aligned to speech)</span>
+                          {g.captions.map((cue, j) => (
+                            <div className="row caption-row" key={j}>
+                              <input type="number" min={0} step={0.05} value={cue.start} aria-label={`Caption ${j + 1} start for scene ${i + 1}`} disabled={busy} onChange={(e) => setCaptions(g.captions.map((x, k) => (k === j ? { ...x, start: Math.max(0, Number(e.target.value)) } : x)))} onBlur={commit} />
+                              <input type="number" min={0} step={0.05} value={cue.end} aria-label={`Caption ${j + 1} end for scene ${i + 1}`} disabled={busy} onChange={(e) => setCaptions(g.captions.map((x, k) => (k === j ? { ...x, end: Math.max(0, Number(e.target.value)) } : x)))} onBlur={commit} />
+                              <input type="text" value={cue.text} maxLength={GRAPHIC_LIMITS.caption} placeholder="Caption text" aria-label={`Caption ${j + 1} text for scene ${i + 1}`} disabled={busy} onChange={(e) => setCaptions(g.captions.map((x, k) => (k === j ? { ...x, text: e.target.value } : x)))} onBlur={commit} />
+                              <input type="text" value={cue.highlight} placeholder="Orange word" aria-label={`Caption ${j + 1} highlight for scene ${i + 1}`} disabled={busy} onChange={(e) => setCaptions(g.captions.map((x, k) => (k === j ? { ...x, highlight: e.target.value } : x)))} onBlur={commit} />
+                              <button type="button" className="btn btn-quiet btn-small" disabled={busy} aria-label={`Remove caption ${j + 1} from scene ${i + 1}`} onClick={() => setCaptions(g.captions.filter((_, k) => k !== j), true)}>
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                          <div className="row">
+                            <button type="button" className="btn btn-quiet btn-small" disabled={busy || g.captions.length >= GRAPHIC_LIMITS.captions} onClick={() => setCaptions([...g.captions, { start: g.captions.at(-1)?.end ?? 0, end: Math.min(s.seconds, (g.captions.at(-1)?.end ?? 0) + 1.5), text: '', highlight: '' }])}>
+                              Add caption
+                            </button>
+                          </div>
+                        </div>
+                        {isMedia && g.media === 'asset' && assetPicker}
+                        {!isMedia && (
+                          <p className={readNeed > s.seconds + 0.05 ? 'warn-line' : 'status-meta'} data-testid="reading-time">
+                            About {readNeed}s to read{readNeed > s.seconds + 0.05 ? `, but the scene is ${s.seconds}s. Give it more time or fewer words.` : ` · scene is ${s.seconds}s.`}
+                          </p>
+                        )}
                       </div>
                     ) : (
-                      <label className="scene-field">
-                        <span className="field-label">Asset for this scene</span>
-                        <div className="row">
-                          {asset && (asset.kind === 'image' ? <img className="thumb thumb-sm" src={asset.url} alt="" /> : <video className="thumb thumb-sm" src={asset.url} muted playsInline preload="metadata" />)}
-                          <select
-                            value={assignments[s.id] ?? ''}
-                            aria-label={`Asset for scene ${i + 1}`}
-                            disabled={busy || library.length === 0}
-                            onChange={(e) => setAssignments((map) => ({ ...map, [s.id]: e.target.value === '' ? undefined : Number(e.target.value) }))}
-                          >
-                            <option value="">{library.length === 0 ? 'Add images or clips first' : 'Choose an asset'}</option>
-                            {library.map((a, j) => (
-                              <option key={a.id} value={a.id}>
-                                {j + 1}. {a.file.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </label>
+                      assetPicker
                     )}
                     {short && (
                       <p className="warn-line" data-testid="scene-short-clip">
@@ -555,7 +677,7 @@ export default function ContentPlan({ plan, dispatch, health, onRendered }: Prop
           </div>
           <ul className="blockers" data-testid="plan-blockers">
             {!voice && <li>No voiceover chosen: the preview will be rendered silent and labelled as such.</li>}
-            {unassigned.length > 0 && <li>Assign an asset to {unassigned.length === assetScenes.length ? 'every asset scene' : `scene${unassigned.length === 1 ? '' : 's'} ${unassigned.map((s) => scenes.indexOf(s) + 1).join(', ')}`}, or switch {unassigned.length === 1 && assetScenes.length > 1 ? 'it to a motion graphic' : 'them to motion graphics'}.</li>}
+            {unassigned.length > 0 && <li>Assign an asset to {unassigned.length === assetScenes.length ? 'every asset scene' : `scene${unassigned.length === 1 ? '' : 's'} ${unassigned.map((s) => scenes.indexOf(s) + 1).join(', ')}`}, or switch {unassigned.length === 1 && assetScenes.length > 1 ? 'it to a motion graphic' : 'them to motion graphics'} (a device or presenter scene can also use a placeholder).</li>}
             {graphicProblems.length > 0 && <li>Give scene{graphicProblems.length === 1 ? '' : 's'} {graphicProblems.join(', ')} a headline.</li>}
             {!serviceReady(health) && health !== null && <li>The local render service isn't available (see the notice above).</li>}
           </ul>

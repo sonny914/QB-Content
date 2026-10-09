@@ -177,3 +177,7 @@ p.warn { margin: 10px 0 0; }
 .graphic-editor .grow { flex: 1 1 200px; }
 .item-row { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(120px, 2fr) auto; gap: 8px; align-items: center; }
 .item-row input { min-width: 0; }
+
+.caption-row { display: grid; grid-template-columns: 72px 72px minmax(120px, 2fr) minmax(80px, 1fr) auto; gap: 8px; align-items: center; }
+.caption-row input { min-width: 0; }
+.seconds .field-label { margin-right: 4px; }

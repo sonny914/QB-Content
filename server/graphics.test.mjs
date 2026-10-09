@@ -122,6 +122,61 @@ describe('frames', () => {
     expect(changed).toBeGreaterThan(20_000)
   })
 
+  it('hero: one-line oversized headline that lands at `land`, then shrinks as the support line takes over', () => {
+    const spec = validateGraphic({ template: 'hero', theme: 'light', headline: 'Morning.', accent: 'Morning. leak', land: 0.8, support: 'A leak under the sink.', beat: 2.0 })
+    const before = renderGraphicFrame(spec, 0.5, 5)
+    const landed = renderGraphicFrame(spec, 1.3, 5)
+    const second = renderGraphicFrame(spec, 3.2, 5)
+    expect(count(before, isOrange, { x: 72, y: 300, w: 576, h: 700 })).toBeLessThan(200) // headline not yet in
+    const landedOrange = count(landed, isOrange, { x: 72, y: 300, w: 576, h: 700 })
+    expect(landedOrange).toBeGreaterThan(8000) // "Morning." in orange, huge
+    // After the beat the headline is small at the top and the support line fills the middle.
+    expect(count(second, isOrange, { x: 72, y: 300, w: 576, h: 700 })).toBeLessThan(landedOrange)
+    expect(count(second, (r, g, b) => r < 60 && g < 60 && b < 60, { x: 72, y: 250, w: 576, h: 400 })).toBeGreaterThan(5000) // black type on cream
+    expect(count(second, isLit, { x: 0, y: 0, w: 60, h: HEIGHT })).toBeGreaterThan(0) // the orange corner forms are allowed in the margin
+  })
+
+  it('device: shows the media inside a card and pushes into the focus region', async () => {
+    const { makeFixtures } = await import('./fixtures.mjs')
+    const fx = await makeFixtures()
+    const spec = validateGraphic({ template: 'device', theme: 'light', label: 'Day shift', media: 'asset', frame: 'phone', focus: { x: 0.6, y: 0.6, w: 0.3, h: 0.3 }, zoom: { start: 0.2, end: 1.0 }, captions: [{ start: 0.1, end: 2, text: 'Day shift logs it,', highlight: 'logs' }] })
+    const { deviceCard, prepareMedia } = await import('./graphics.mjs')
+    const card = deviceCard('phone', 1)
+    const media = await prepareMedia({ assetPath: fx.orange, kind: 'image', seconds: 2, slot: card, scale: 2, outDir: path.join(scratch, 'media-orange') })
+    expect(media).toMatchObject({ count: 1, w: 800, h: 1664 })
+    const { loadImage } = await import('@napi-rs/canvas')
+    const image = await loadImage(path.join(media.dir, 'f00001.jpg'))
+    const frame = renderGraphicFrame(spec, 1.5, 2, { image, w: media.w, h: media.h })
+    // The card interior is the orange fixture; the caption shows the highlighted word; the label is there.
+    expect(count(frame, isOrange, { x: card.x + 20, y: card.y + 20, w: card.w - 40, h: card.h - 40 })).toBeGreaterThan(card.w * card.h * 0.6)
+    expect(count(frame, (r, g, b) => r < 60 && g < 60 && b < 60, { x: 100, y: 1040, w: 520, h: 100 })).toBeGreaterThan(300) // caption text
+    const placeholder = renderGraphicFrame(validateGraphic({ template: 'device', media: 'placeholder' }), 1, 2)
+    expect(count(placeholder, isOrange, { x: card.x, y: card.y, w: card.w, h: card.h })).toBeGreaterThan(100) // "SCREENSHOT" label in the empty slot
+  })
+
+  it('presenter: without a clip it draws a labelled empty slot, never a stand-in picture; captions still time', () => {
+    const spec = validateGraphic({ template: 'presenter', media: 'placeholder', captions: [{ start: 0.5, end: 1.5, text: 'tries the easy fix,', highlight: 'easy' }, { start: 1.5, end: 2.5, text: 'clocks out.' }] })
+    const early = renderGraphicFrame(spec, 0.2, 3)
+    const first = renderGraphicFrame(spec, 1.0, 3)
+    const second = renderGraphicFrame(spec, 2.0, 3)
+    const captionZone = { x: 100, y: 1040, w: 520, h: 110 }
+    expect(count(early, isCream, captionZone)).toBe(0)
+    expect(count(first, isOrange, captionZone)).toBeGreaterThan(300) // "easy"
+    expect(count(second, isOrange, captionZone)).toBe(0)
+    expect(count(second, isCream, captionZone)).toBeGreaterThan(300)
+    expect(count(first, isOrange, { x: 60, y: 120, w: 600, h: 60 })).toBeGreaterThan(100) // "PRESENTER CLIP · NOT SUPPLIED" label
+  })
+
+  it('validates the new properties', () => {
+    expect(() => validateGraphic({ template: 'device', media: 'url' })).toThrow(/media must be "asset" or "placeholder"/)
+    expect(() => validateGraphic({ template: 'hero', headline: 'x', theme: 'sepia' })).toThrow(/theme must be "dark" or "light"/)
+    expect(() => validateGraphic({ template: 'device', focus: { x: 0.8, y: 0, w: 0.5, h: 0.5 } })).toThrow(/focus must be/)
+    expect(() => validateGraphic({ template: 'device', zoom: { start: 2, end: 1 } })).toThrow(/zoom must be/)
+    expect(() => validateGraphic({ template: 'presenter', captions: [{ start: 0, end: 1, text: '' }] })).toThrow(/captions\[0\].text is required/)
+    expect(() => validateGraphic({ template: 'presenter', captions: [{ start: 1, end: 0.5, text: 'x' }] })).toThrow(/needs start and end seconds/)
+    expect(validateGraphic({ template: 'presenter' })).toMatchObject({ media: 'asset', headline: '', theme: 'dark', land: 0.3 })
+  })
+
   it('renders a clip of exactly the requested length with the text visible', async () => {
     const output = path.join(scratch, 'title.mp4')
     let last = 0

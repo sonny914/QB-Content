@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EMPTY_GRAPHIC, EMPTY_PLAN_INPUTS, extractJson, graphicReadingSeconds, parsePlan, planSnapshot, scaleScenes, totalSeconds, type ContentPlan } from './plan'
+import { EMPTY_GRAPHIC, EMPTY_PLAN_INPUTS, extractJson, graphicNeedsAsset, graphicReadingSeconds, parsePlan, planSnapshot, scaleScenes, totalSeconds, type ContentPlan } from './plan'
 import { buildPlanningPrompt } from './planPrompt'
 
 const valid = {
@@ -136,7 +136,7 @@ describe('graphic scenes', () => {
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.errors).toEqual([
-      'scenes[0].graphic.template must be one of title, card, notes, question (got "poster").',
+      'scenes[0].graphic.template must be one of title, card, notes, question, hero, device, presenter (got "poster").',
       'scenes[0].graphic.headline is required.',
       'scenes[0].graphic.items[0].text is required.',
       'scenes[0].graphic.emphasize must be "headline" or an item index 0 to 0 (got 5).',
@@ -144,6 +144,37 @@ describe('graphic scenes', () => {
     ])
     const slow = parsePlan(JSON.stringify({ ...valid, scenes: [{ ...graphicScene, seconds: 1 }] }))
     expect(slow.ok && slow.warnings[0]).toMatch(/needs about [\d.]+s to read but the scene is 1s/)
+  })
+
+  it('accepts media, caption and motion properties and rejects bad ones with paths', () => {
+    const r = parsePlan(JSON.stringify({ ...valid, scenes: [
+      { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'device', theme: 'light', label: 'Day shift', media: 'asset', frame: 'phone', focus: { x: 0.2, y: 0.3, w: 0.5, h: 0.3 }, zoom: { start: 0.5, end: 2 }, captions: [{ start: 0.2, end: 2.4, text: 'Day shift logs it,', highlight: 'logs' }] } },
+      { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'presenter', media: 'placeholder' } },
+      { narration: 'n', visual: 'v', seconds: 4, kind: 'graphic', graphic: { template: 'hero', theme: 'light', headline: 'Morning.', accent: 'Morning.', land: 0.8, support: 'A leak.', beat: 2 } },
+    ] }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.plan.scenes[0].graphic).toMatchObject({ template: 'device', theme: 'light', media: 'asset', frame: 'phone', focus: { x: 0.2, y: 0.3, w: 0.5, h: 0.3 }, zoom: { start: 0.5, end: 2 } })
+    expect(r.plan.scenes[0].graphic?.captions[0]).toEqual({ start: 0.2, end: 2.4, text: 'Day shift logs it,', highlight: 'logs' })
+    expect(r.plan.scenes[1].graphic).toMatchObject({ template: 'presenter', media: 'placeholder', headline: '' })
+    expect(r.plan.scenes[2].graphic).toMatchObject({ land: 0.8, beat: 2, accent: 'Morning.' })
+    expect(graphicNeedsAsset(r.plan.scenes[0].graphic)).toBe(true)
+    expect(graphicNeedsAsset(r.plan.scenes[1].graphic)).toBe(false)
+
+    const bad = parsePlan(JSON.stringify({ ...valid, scenes: [
+      { narration: 'n', visual: 'v', seconds: 3, kind: 'graphic', graphic: { template: 'device', theme: 'sepia', media: 'url', frame: 'tv', focus: { x: 0.8, y: 0, w: 0.5, h: 0.5 }, zoom: { start: 2, end: 1 }, captions: [{ start: 1, end: 0.5, text: '' }] } },
+    ] }))
+    expect(bad.ok).toBe(false)
+    if (bad.ok) return
+    expect(bad.errors).toEqual([
+      'scenes[0].graphic.theme must be "dark" or "light".',
+      'scenes[0].graphic.media must be "asset" or "placeholder".',
+      'scenes[0].graphic.frame must be auto, phone or desktop.',
+      'scenes[0].graphic.focus must be { x, y, w, h } as fractions of the media that stay inside it.',
+      'scenes[0].graphic.zoom must be { start, end } seconds with end after start.',
+      'scenes[0].graphic.captions[0].text is required.',
+      'scenes[0].graphic.captions[0] needs start and end seconds with end after start.',
+    ])
   })
 
   it('reading time counts every word on screen', () => {

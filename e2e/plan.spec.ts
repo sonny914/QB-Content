@@ -126,7 +126,7 @@ test('plan → assets + voiceover → render → review → approve, and edits m
   await expect(page.getByTestId('library').locator('li')).toHaveCount(2)
   await page.getByLabel('Asset for scene 1').selectOption({ label: '1. frame-orange.png' })
   await page.getByLabel('Asset for scene 2').selectOption({ label: '2. frame-cream-portrait.png' })
-  await expect(page.getByTestId('plan-blockers')).toContainText('Assign an asset to scene 3, or switch it to a motion graphic.')
+  await expect(page.getByTestId('plan-blockers')).toContainText('Assign an asset to scene 3, or switch it to a motion graphic')
   await page.getByLabel('Asset for scene 3').selectOption({ label: '1. frame-orange.png' })
   await expect(create).toBeEnabled()
   await expect(create).toHaveText('Create preview from plan v2')

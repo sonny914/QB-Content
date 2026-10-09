@@ -23,24 +23,47 @@ export const PLAN_INPUT_FIELDS: { key: PlanInputField; label: string; multiline:
 
 export const EMPTY_PLAN_INPUTS: PlanInputs = { business: '', audience: '', offer: '', topic: '', tone: '', cta: '' }
 
-export const GRAPHIC_TEMPLATES = ['title', 'card', 'notes', 'question'] as const
+export const GRAPHIC_TEMPLATES = ['title', 'card', 'notes', 'question', 'hero', 'device', 'presenter'] as const
 export type GraphicTemplate = (typeof GRAPHIC_TEMPLATES)[number]
-export const GRAPHIC_LIMITS = { headline: 90, support: 160, label: 24, items: 4, itemLabel: 20, itemText: 60 }
+/** Templates that show an uploaded image or clip in a media slot. */
+export const MEDIA_TEMPLATES: readonly GraphicTemplate[] = ['device', 'presenter']
+export const GRAPHIC_LIMITS = { headline: 90, support: 160, label: 24, items: 4, itemLabel: 20, itemText: 60, captions: 12, caption: 80 }
 
 export interface GraphicItem {
   label: string
   text: string
 }
 
+/** A timed caption cue, in seconds from the start of the scene. */
+export interface CaptionCue {
+  start: number
+  end: number
+  text: string
+  highlight: string
+}
+
 /** A motion-graphic scene the local renderer draws itself. Only these properties are understood. */
 export interface GraphicSpec {
   template: GraphicTemplate
+  theme: 'dark' | 'light'
   headline: string
   support: string
   label: string
+  /** Words (space separated) drawn in orange wherever they appear in the headline, support or captions. */
+  accent: string
   items: GraphicItem[]
   emphasize: 'headline' | number | null
   gather: boolean
+  /** Media templates: 'asset' takes an uploaded image or clip; 'placeholder' draws a labelled empty slot. */
+  media: 'none' | 'asset' | 'placeholder'
+  frame: 'auto' | 'phone' | 'desktop'
+  /** Region of the media (fractions) the device or presenter pushes into. */
+  focus: { x: number; y: number; w: number; h: number } | null
+  zoom: { start: number; end: number } | null
+  /** hero: when the headline lands and when the support line takes over, in seconds. */
+  land: number
+  beat: number | null
+  captions: CaptionCue[]
 }
 
 export interface PlanScene {
@@ -53,7 +76,24 @@ export interface PlanScene {
   graphic: GraphicSpec | null
 }
 
-export const EMPTY_GRAPHIC: GraphicSpec = { template: 'title', headline: '', support: '', label: '', items: [], emphasize: null, gather: false }
+export const EMPTY_GRAPHIC: GraphicSpec = {
+  template: 'title',
+  theme: 'dark',
+  headline: '',
+  support: '',
+  label: '',
+  accent: '',
+  items: [],
+  emphasize: null,
+  gather: false,
+  media: 'none',
+  frame: 'auto',
+  focus: null,
+  zoom: null,
+  land: 0.3,
+  beat: null,
+  captions: [],
+}
 
 /** Validate a graphic spec, collecting every problem. Mirrors server/graphics.mjs. */
 export function validateGraphic(raw: unknown, where: string): { ok: true; spec: GraphicSpec } | { ok: false; errors: string[] } {
@@ -64,7 +104,8 @@ export function validateGraphic(raw: unknown, where: string): { ok: true; spec: 
   const template = (GRAPHIC_TEMPLATES as readonly string[]).includes(templateRaw as string) ? (templateRaw as GraphicTemplate) : null
   if (!template) errors.push(`${where}.template must be one of ${GRAPHIC_TEMPLATES.join(', ')} (got ${show(raw.template)}).`)
   const headline = s(raw.headline)
-  if (!headline) errors.push(`${where}.headline is required.`)
+  const needsHeadline = !template || !MEDIA_TEMPLATES.includes(template)
+  if (!headline && needsHeadline) errors.push(`${where}.headline is required.`)
   else if (headline.length > GRAPHIC_LIMITS.headline) errors.push(`${where}.headline must be ${GRAPHIC_LIMITS.headline} characters or fewer (got ${headline.length}).`)
   const support = s(raw.support)
   if (support.length > GRAPHIC_LIMITS.support) errors.push(`${where}.support must be ${GRAPHIC_LIMITS.support} characters or fewer.`)
@@ -96,8 +137,76 @@ export function validateGraphic(raw: unknown, where: string): { ok: true; spec: 
     else errors.push(`${where}.emphasize must be "headline" or an item index 0 to ${Math.max(items.length - 1, 0)} (got ${show(raw.emphasize)}).`)
   }
   if (template === 'notes' && items.length === 0) errors.push(`${where}: the notes template needs at least one item.`)
+
+  const themeRaw = raw.theme === undefined ? 'dark' : raw.theme
+  const theme: GraphicSpec['theme'] = themeRaw === 'light' ? 'light' : 'dark'
+  if (themeRaw !== 'dark' && themeRaw !== 'light') errors.push(`${where}.theme must be "dark" or "light".`)
+  const accent = s(raw.accent)
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+  let media: GraphicSpec['media'] = 'none'
+  if (template && MEDIA_TEMPLATES.includes(template)) {
+    media = raw.media === undefined ? 'asset' : (raw.media as GraphicSpec['media'])
+    if (media !== 'asset' && media !== 'placeholder') errors.push(`${where}.media must be "asset" or "placeholder".`)
+  }
+  const frameRaw = raw.frame === undefined ? 'auto' : raw.frame
+  const frame: GraphicSpec['frame'] = frameRaw === 'phone' || frameRaw === 'desktop' ? frameRaw : 'auto'
+  if (frameRaw !== 'auto' && frameRaw !== 'phone' && frameRaw !== 'desktop') errors.push(`${where}.frame must be auto, phone or desktop.`)
+
+  let focus: GraphicSpec['focus'] = null
+  if (raw.focus !== undefined && raw.focus !== null) {
+    const f = isRecord(raw.focus) ? raw.focus : {}
+    const vals = [n(f.x), n(f.y), n(f.w), n(f.h)]
+    if (vals.some((v) => v === null || v < 0 || v > 1) || (vals[2] as number) <= 0 || (vals[3] as number) <= 0 || (vals[0] as number) + (vals[2] as number) > 1.0001 || (vals[1] as number) + (vals[3] as number) > 1.0001) {
+      errors.push(`${where}.focus must be { x, y, w, h } as fractions of the media that stay inside it.`)
+    } else focus = { x: vals[0] as number, y: vals[1] as number, w: vals[2] as number, h: vals[3] as number }
+  }
+  let zoom: GraphicSpec['zoom'] = null
+  if (raw.zoom !== undefined && raw.zoom !== null) {
+    const z = isRecord(raw.zoom) ? raw.zoom : {}
+    const zs = n(z.start)
+    const ze = n(z.end)
+    if (zs === null || ze === null || zs < 0 || ze <= zs) errors.push(`${where}.zoom must be { start, end } seconds with end after start.`)
+    else zoom = { start: zs, end: ze }
+  }
+  let land = 0.3
+  if (raw.land !== undefined && raw.land !== null) {
+    const l = n(raw.land)
+    if (l === null || l < 0) errors.push(`${where}.land must be a time in seconds.`)
+    else land = l
+  }
+  let beat: number | null = null
+  if (raw.beat !== undefined && raw.beat !== null) {
+    const b = n(raw.beat)
+    if (b === null || b < 0) errors.push(`${where}.beat must be a time in seconds.`)
+    else beat = b
+  }
+  const captions: CaptionCue[] = []
+  if (raw.captions !== undefined && raw.captions !== null) {
+    if (!Array.isArray(raw.captions)) errors.push(`${where}.captions must be an array.`)
+    else {
+      if (raw.captions.length > GRAPHIC_LIMITS.captions) errors.push(`${where}.captions can hold at most ${GRAPHIC_LIMITS.captions} cues.`)
+      raw.captions.forEach((c, i) => {
+        if (!isRecord(c)) {
+          errors.push(`${where}.captions[${i}] must be an object with start, end and text.`)
+          return
+        }
+        const text = s(c.text)
+        const start = n(c.start)
+        const end = n(c.end)
+        if (!text) errors.push(`${where}.captions[${i}].text is required.`)
+        else if (text.length > GRAPHIC_LIMITS.caption) errors.push(`${where}.captions[${i}].text must be ${GRAPHIC_LIMITS.caption} characters or fewer.`)
+        if (start === null || end === null || start < 0 || end <= start) errors.push(`${where}.captions[${i}] needs start and end seconds with end after start.`)
+        else captions.push({ text, start, end, highlight: s(c.highlight) })
+      })
+    }
+  }
+
   if (errors.length || !template) return { ok: false, errors }
-  return { ok: true, spec: { template, headline, support, label, items, emphasize, gather: template === 'notes' && raw.gather === true } }
+  return {
+    ok: true,
+    spec: { template, theme, headline, support, label, accent, items, emphasize, gather: template === 'notes' && raw.gather === true, media, frame, focus, zoom, land, beat, captions },
+  }
 }
 
 /** Seconds a viewer needs to read a graphic: a settle-in allowance plus three words per second. */
@@ -105,6 +214,9 @@ export function graphicReadingSeconds(spec: GraphicSpec): number {
   const words = [spec.headline, spec.support, spec.label, ...spec.items.flatMap((i) => [i.label, i.text])].join(' ').split(/\s+/).filter(Boolean).length
   return r1(1.2 + words / 3)
 }
+
+/** Does this graphic take an uploaded asset for its media slot? */
+export const graphicNeedsAsset = (g: GraphicSpec | null) => Boolean(g && MEDIA_TEMPLATES.includes(g.template) && g.media === 'asset')
 
 /** Fill in defaults for scenes saved before graphics existed. */
 export function normaliseScene(scene: Partial<PlanScene> & { id: string; narration: string; visual: string; seconds: number }): PlanScene {

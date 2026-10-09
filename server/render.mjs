@@ -2,7 +2,7 @@
 // clips, or motion-graphic scenes drawn locally) plus one voiceover track, or silence when none is
 // attached. Simple assembly: each entry is shown for its assigned seconds. No speech alignment.
 import { FFMPEG, probe, run } from './ffmpeg.mjs'
-import { readingSeconds, renderGraphicClip, validateGraphic } from './graphics.mjs'
+import { deviceCard, prepareMedia, readingSeconds, renderGraphicClip, validateGraphic, WIDTH as GW, HEIGHT as GH } from './graphics.mjs'
 
 export const WIDTH = 720
 export const HEIGHT = 1280
@@ -71,7 +71,15 @@ export function validateTimeline(timeline, assetCount) {
     if (!Number.isFinite(n)) throw new Error(`Scene ${i + 1} has no duration`)
     if (n < MIN_SECONDS || n > MAX_SECONDS) throw new Error(`Scene ${i + 1} must be between ${MIN_SECONDS} and ${MAX_SECONDS} seconds`)
     const seconds = round(n)
-    if (entry.source === 'graphic') return { seconds, source: 'graphic', graphic: validateGraphic(entry.graphic, `Scene ${i + 1} graphic`) }
+    if (entry.source === 'graphic') {
+      const graphic = validateGraphic(entry.graphic, `Scene ${i + 1} graphic`)
+      // A graphic with a media slot set to 'asset' consumes the next uploaded file, like an asset scene.
+      if (graphic.media === 'asset') {
+        if (assetIndex >= assetCount) throw new Error(`Scene ${i + 1} needs an uploaded image or clip for its ${graphic.template} slot but only ${assetCount} ${assetCount === 1 ? 'was' : 'were'} sent`)
+        return { seconds, source: 'graphic', graphic, assetIndex: assetIndex++ }
+      }
+      return { seconds, source: 'graphic', graphic }
+    }
     if (entry.source === 'asset' || entry.source === undefined) {
       if (assetIndex >= assetCount) throw new Error(`Scene ${i + 1} needs an uploaded asset but only ${assetCount} ${assetCount === 1 ? 'was' : 'were'} sent`)
       return { seconds, source: 'asset', assetIndex: assetIndex++ }
@@ -100,9 +108,24 @@ export async function plan({ voiceover, assets, timeline, jobDir }) {
   for (const [i, entry] of timeline.entries()) {
     const seconds = entry.seconds
     if (entry.source === 'graphic') {
-      const need = readingSeconds(entry.graphic)
-      if (seconds < need - 0.05) notes.push(`Scene ${i + 1} shows ${entry.graphic.headline ? 'text' : 'a graphic'} that needs about ${need}s to read but is set to ${seconds}s.`)
-      items.push({ index: i, name: `graphic: ${entry.graphic.headline}`, path: `${jobDir}/graphic-${i}.mp4`, kind: 'video', seconds, sourceDuration: seconds, hold: 0, graphic: entry.graphic })
+      const g = entry.graphic
+      const need = readingSeconds(g)
+      if (seconds < need - 0.05) notes.push(`Scene ${i + 1} shows text that needs about ${need}s to read but is set to ${seconds}s.`)
+      for (const cue of g.captions) {
+        if (cue.end > seconds + 0.05) notes.push(`Scene ${i + 1}: a caption runs to ${cue.end}s but the scene is ${seconds}s.`)
+      }
+      const item = { index: i, name: `graphic: ${g.headline || g.template}`, path: `${jobDir}/graphic-${i}.mp4`, kind: 'video', seconds, sourceDuration: seconds, hold: 0, graphic: g, mediaAsset: null }
+      if (entry.assetIndex !== undefined) {
+        const asset = assets[entry.assetIndex]
+        const info = await probe(asset.path).catch((err) => {
+          throw new Error(`Scene ${i + 1} (${asset.name}) can't be read: ${err.message}`)
+        })
+        if (info.kind === 'audio') throw new Error(`Scene ${i + 1} (${asset.name}) is audio only. The ${g.template} slot needs an image or video clip`)
+        item.mediaAsset = { path: asset.path, name: asset.name, kind: info.kind, width: info.width, height: info.height, duration: round(info.duration) }
+        item.name += ` + ${asset.name}`
+        if (info.kind === 'video' && info.duration > 0 && info.duration < seconds - 0.05) notes.push(`Clip in scene ${i + 1} (${asset.name}) is ${round(info.duration)}s but the scene is ${seconds}s, so its last frame holds for ${round(seconds - info.duration)}s.`)
+      }
+      items.push(item)
       continue
     }
     const asset = assets[entry.assetIndex]
@@ -178,10 +201,20 @@ export async function render({ items, total, voiceover, output, format, onProgre
   let drawn = 0
   for (const [n, item] of graphics.entries()) {
     if (onStage) onStage(`Drawing graphic scene ${item.index + 1} (${n + 1} of ${graphics.length})`)
+    let media = null
+    if (item.mediaAsset) {
+      const g = item.graphic
+      const aspect = item.mediaAsset.width && item.mediaAsset.height ? item.mediaAsset.width / item.mediaAsset.height : null
+      const slot = g.template === 'presenter' ? { w: GW, h: GH } : deviceCard(g.frame, aspect)
+      // A focus zoom needs more source pixels than the slot shows at rest; render up to 2.5× for it.
+      const zoomScale = g.focus ? Math.min(2.5, 1 / Math.max(g.focus.w, g.focus.h, 0.4)) : 1
+      media = await prepareMedia({ assetPath: item.mediaAsset.path, kind: item.mediaAsset.kind, seconds: item.seconds, slot, scale: zoomScale, outDir: `${item.path}.frames`, signal })
+    }
     await renderGraphicClip({
       spec: item.graphic,
       seconds: item.seconds,
       output: item.path,
+      media,
       signal,
       onProgress: (p) => onProgress && onProgress(((drawn + p * item.seconds) / graphicSeconds) * drawShare),
     })

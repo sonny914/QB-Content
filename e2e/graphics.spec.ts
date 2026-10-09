@@ -86,7 +86,7 @@ test('switching a scene to a motion graphic in the editor needs no upload for th
   await page.getByLabel("Paste Claude's JSON reply").fill(JSON.stringify(plan))
   await page.getByTestId('import-plan').click()
   await expect(page.getByTestId('graphic-editor')).toHaveCount(0)
-  await expect(page.getByTestId('plan-blockers')).toContainText('Assign an asset to every asset scene, or switch them to motion graphics.')
+  await expect(page.getByTestId('plan-blockers')).toContainText('Assign an asset to every asset scene, or switch them to motion graphics')
 
   for (let i = 1; i <= 7; i++) await page.getByRole('radiogroup', { name: `Visual source for scene ${i}` }).getByLabel('Motion graphic').check()
   await expect(page.getByTestId('graphic-editor')).toHaveCount(7)

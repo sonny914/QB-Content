@@ -58,13 +58,20 @@ for people.
 
 | Property | Rules |
 |---|---|
-| `template` | `title` (headline, optional support), `card` (labelled card with items entering one by one), `notes` (separate notes scattered across the frame; `gather: true` makes them travel into one card mid-scene), `question` (closing question with an orange rule). Default `title`. |
+| `template` | `title` (headline, optional support), `card` (labelled card with items entering one by one), `notes` (separate notes scattered across the frame; `gather: true` makes them travel into one card mid-scene), `question` (closing question with an orange rule), `hero` (oversized type: the headline punches in at `land`, then shrinks up as `support` lands at `beat`), `device` (an uploaded screenshot or recording on a floating device card, optional push into `focus`), `presenter` (an uploaded clip of the owner to camera, full frame). Default `title`. |
 | `headline` | Required, up to 90 characters. Wrapped and shrunk to fit the frame. |
 | `support` | Optional, up to 160 characters. |
 | `label` | Optional small-caps label such as "Morning", up to 24 characters. |
 | `items` | Up to 4 `{ label, text }` entries (label ≤ 20, text ≤ 60 characters). `notes` needs at least one. |
 | `emphasize` | `"headline"` or an item index. Lights that element orange just past the middle of the scene. |
 | `gather` | `notes` only. |
+| `theme` | `dark` (default: black ground, cream type) or `light` (cream ground with a faint dot grid and orange corner forms, black type). |
+| `accent` | Space-separated words drawn in orange wherever they appear in the headline or support line. |
+| `media` | `device` and `presenter` only: `asset` (default) takes the next uploaded image or clip; `placeholder` draws a labelled empty slot and never a stand-in picture. |
+| `frame` | `device` only: `auto` (phone card for portrait media, desktop card for landscape), `phone`, `desktop`. |
+| `focus` | `{ x, y, w, h }` fractions of the media to push into; the push runs over `zoom: { start, end }` seconds (default 0.4–1.6). |
+| `land`, `beat` | `hero` only: seconds when the headline hits (default 0.3) and when the support line takes over (default mid-scene). |
+| `captions` | Up to 12 cues `{ start, end, text, highlight }` in seconds from the scene start, drawn at the bottom with the `highlight` word in orange. Timing is set by hand or from the recording's pauses; nothing aligns them to speech automatically. |
 
 Motion is fixed per template: fade-and-rise entrances (items staggered), the emphasis pulse, the
 gather, and a short fade at the end. Colours are QB's black, cream and orange. Text always stays inside
@@ -72,6 +79,7 @@ the frame's safe area; a scene with more words than its seconds allow gets a war
 per second plus a settle-in second).
 
 `docs/examples/handoff-reel-plan.json` is a complete plan built from graphic scenes only.
+`docs/examples/style-test-plan.json` is the 10.4 s style test: hero → device (takes one uploaded recording) → presenter placeholder, with captions timed to the owner's recording.
 
 ## Where it goes
 
