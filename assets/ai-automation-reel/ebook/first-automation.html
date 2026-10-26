@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Your First Automation: The 8 AM Weather Bot</title>
+<link href="https://fonts.googleapis.com/css2?family=Hubot+Sans:wdth,wght@75..125,300..900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+<!-- The free BANDS guide, laid out as 6 × 9 in pages. render-ebook.mjs prints it to first-automation.pdf.
+     Dashed boxes marked SCREENSHOT are placeholders: swap each for a real capture (token blurred) before sending. -->
+<style>
+  @page { size: 6in 9in; margin: 0; }
+  :root { --black: #000; --cream: #F2EEE5; --orange: #FF5A00; --dim: rgba(242,238,229,.62); --hair: rgba(242,238,229,.16); --panel: rgba(242,238,229,.05); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--black); color: var(--cream); font-family: "Hubot Sans", system-ui, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .page { width: 6in; height: 9in; padding: 52px 48px 56px; position: relative; overflow: hidden; break-after: page; display: flex; flex-direction: column; }
+  .page:last-child { break-after: auto; }
+  .grid { position: absolute; inset: 0; background-image: radial-gradient(rgba(242,238,229,.12) 1.2px, transparent 1.4px); background-size: 22px 22px; opacity: .55; pointer-events: none; }
+  .page > *:not(.grid):not(.folio) { position: relative; }
+
+  .mark, .word { display: inline-block; background: currentColor; -webkit-mask: var(--src) center / contain no-repeat; mask: var(--src) center / contain no-repeat; }
+  .mark { --src: url(mark.svg); }
+  .word { --src: url(wordmark.svg); }
+  .lockup { display: flex; align-items: center; gap: 10px; color: var(--cream); }
+  .lockup .mark { width: 28px; height: 22px; } .lockup .word { width: 109px; height: 20px; }
+
+  .runner { display: flex; justify-content: space-between; align-items: center; font: 600 9.5px/1 "JetBrains Mono", monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin-bottom: 30px; }
+  .runner .lockup .mark { width: 18px; height: 14px; } .runner .lockup .word { width: 70px; height: 13px; }
+  .folio { position: absolute; bottom: 26px; left: 48px; right: 48px; display: flex; justify-content: space-between; font: 600 9px/1 "JetBrains Mono", monospace; letter-spacing: .12em; color: var(--dim); }
+
+  .kicker { font: 700 10px/1 "JetBrains Mono", monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); margin-bottom: 10px; }
+  h1 { font-weight: 900; font-stretch: 75%; font-size: 64px; line-height: .9; letter-spacing: -.01em; }
+  h2 { font-weight: 900; font-stretch: 75%; font-size: 40px; line-height: .95; margin-bottom: 14px; }
+  h3 { font-weight: 800; font-size: 14px; margin: 16px 0 6px; }
+  p, li { font-size: 12.5px; line-height: 1.5; }
+  p + p { margin-top: 8px; }
+  ol, ul { padding-left: 18px; } li { margin: 4px 0; padding-left: 2px; }
+  ol li::marker { font: 700 11px "JetBrains Mono", monospace; color: var(--dim); }
+  strong { font-weight: 800; }
+  .live { color: var(--orange); }
+  code, .mono { font-family: "JetBrains Mono", monospace; font-size: 10.5px; }
+  code { background: var(--panel); border: 1px solid var(--hair); border-radius: 4px; padding: 1px 4px; white-space: nowrap; }
+  pre { font: 400 9.5px/1.5 "JetBrains Mono", monospace; background: var(--panel); border: 1px solid var(--hair); border-radius: 10px; padding: 10px 12px; margin: 8px 0; white-space: pre-wrap; word-break: break-all; }
+
+  .note { border: 1px solid var(--hair); border-radius: 12px; padding: 10px 14px; margin: 12px 0; background: var(--panel); }
+  .note.warn { border-color: var(--orange); }
+  .note .tag { font: 700 9px/1 "JetBrains Mono", monospace; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 6px; color: var(--dim); }
+  .note.warn .tag { color: var(--orange); }
+  .note p, .note li { font-size: 11.5px; }
+
+  .shot { margin-top: auto; border: 1.5px dashed rgba(242,238,229,.35); border-radius: 14px; min-height: 150px; display: grid; place-items: center; text-align: center; padding: 14px; color: var(--dim); font: 600 10px/1.5 "JetBrains Mono", monospace; letter-spacing: .06em; }
+  .shot b { display: block; color: var(--cream); letter-spacing: .14em; margin-bottom: 4px; }
+  .cap { margin-top: auto; } .cap img { display: block; width: 100%; border-radius: 14px; border: 1px solid var(--hair); }
+  .cap figcaption { font: 600 9px/1.4 "JetBrains Mono", monospace; letter-spacing: .08em; color: var(--dim); margin-top: 6px; }
+  /* MOCK illustrations: drawn, not captured. Each carries an EXAMPLE tag and a caption saying so. */
+  .mock { position: relative; border: 1px solid var(--hair); border-radius: 14px; background: #0d0d0d; padding: 14px; }
+  .mock .ex { position: absolute; top: 10px; right: 10px; font: 700 8.5px/1 "JetBrains Mono", monospace; letter-spacing: .14em; color: var(--black); background: var(--cream); border-radius: 99px; padding: 4px 7px; }
+  .mock-url { font: 600 9px/1 "JetBrains Mono", monospace; color: var(--dim); border: 1px solid var(--hair); border-radius: 99px; padding: 6px 10px; margin: 0 70px 10px 0; white-space: nowrap; overflow: hidden; }
+  .mock-json { font: 400 9.5px/1.6 "JetBrains Mono", monospace; color: var(--dim); white-space: pre; }
+  .mock-json .hit { color: var(--black); background: var(--orange); border-radius: 3px; padding: 0 3px; font-weight: 700; }
+  .mock-chat { display: flex; flex-direction: column; gap: 8px; padding-top: 18px; }
+  .mock-chat .day { align-self: center; font: 700 8.5px/1 "JetBrains Mono", monospace; letter-spacing: .12em; color: var(--dim); }
+  .bubble { align-self: flex-start; max-width: 78%; background: var(--cream); color: var(--black); border-radius: 14px 14px 14px 4px; padding: 9px 12px 7px; font-size: 12.5px; line-height: 1.4; }
+  .bubble small { display: block; text-align: right; font: 600 8.5px/1 "JetBrains Mono", monospace; opacity: .55; margin-top: 4px; }
+  .mock-runs { padding-top: 16px; }
+  .run { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--hair); font-size: 11.5px; }
+  .run:last-child { border-bottom: 0; }
+  .run .ok { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--cream); display: grid; place-items: center; font: 700 9px/1 "JetBrains Mono", monospace; }
+  .run b { font-weight: 800; } .run span:last-child { margin-left: auto; font: 600 9px/1 "JetBrains Mono", monospace; color: var(--dim); }
+  .step-num { font: 700 11px/1 "JetBrains Mono", monospace; letter-spacing: .14em; color: var(--dim); }
+  .time { font: 600 10px/1 "JetBrains Mono", monospace; color: var(--dim); border: 1px solid var(--hair); border-radius: 99px; padding: 4px 8px; }
+  .step-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+
+  /* the workflow, drawn as nodes */
+  .flow { display: flex; align-items: center; gap: 0; margin: 18px 0 6px; }
+  .node { flex: none; width: 92px; text-align: center; }
+  .node .box { width: 64px; height: 64px; margin: 0 auto 8px; border: 2px solid var(--cream); border-radius: 14px; display: grid; place-items: center; font: 700 22px/1 "JetBrains Mono", monospace; }
+  .node.trigger .box { border-radius: 32px 14px 14px 32px; }
+  .node .label { font-weight: 800; font-size: 11.5px; } .node .sub { font: 600 8.5px/1.3 "JetBrains Mono", monospace; letter-spacing: .1em; color: var(--dim); text-transform: uppercase; margin-top: 2px; }
+  .wire { flex: 1; height: 2px; background: var(--cream); position: relative; margin-bottom: 38px; }
+  .wire::after { content: ""; position: absolute; right: -1px; top: -4px; border: 5px solid transparent; border-left: 7px solid var(--cream); border-right: 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 11px; line-height: 1.4; }
+  th { text-align: left; font: 700 9px/1 "JetBrains Mono", monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); padding: 0 8px 8px 0; border-bottom: 1px solid var(--hair); }
+  td { vertical-align: top; padding: 9px 8px 9px 0; border-bottom: 1px solid var(--hair); }
+  td:first-child { font-weight: 800; width: 34%; }
+
+  /* cover */
+  .cover { padding: 48px; justify-content: space-between; }
+  .cover .big-mark { width: 150px; height: 120px; color: var(--cream); }
+  .cover h1 { font-size: 78px; margin: 18px 0 14px; }
+  .cover .dek { font-size: 15px; line-height: 1.45; max-width: 360px; color: var(--dim); }
+  .cover .dek strong { color: var(--cream); }
+  .cover .bottom { display: flex; justify-content: space-between; align-items: flex-end; font: 600 10px/1.5 "JetBrains Mono", monospace; letter-spacing: .1em; color: var(--dim); text-transform: uppercase; }
+  .proof { display: inline-flex; gap: 8px; align-items: center; font: 700 10px/1 "JetBrains Mono", monospace; letter-spacing: .12em; text-transform: uppercase; border: 1px solid var(--hair); border-radius: 99px; padding: 7px 12px; margin-top: 22px; }
+  .proof i { width: 7px; height: 7px; border-radius: 50%; background: var(--orange); display: block; }
+
+  .end h2 { font-size: 54px; }
+</style>
+</head>
+<body>
+
+<!-- 1. cover -->
+<section class="page cover">
+  <div class="grid"></div>
+  <div class="lockup"><span class="mark" aria-hidden="true"></span><span class="word" role="img" aria-label="Quiet Bands"></span></div>
+  <div>
+    <div class="kicker">Automation 01 · Free guide</div>
+    <h1>Your first<br />automation.</h1>
+    <p class="dek">The <strong>8 AM Weather Bot.</strong> One trigger, one action. About 20 minutes. No code.</p>
+    <div class="proof"><i></i>Tested on a live workflow</div>
+  </div>
+  <div class="bottom"><span>@flighty.builds</span><span>n8n · Open-Meteo · Telegram</span></div>
+</section>
+
+<!-- 2. the idea -->
+<section class="page">
+  <div class="grid"></div>
+  <div class="runner"><span class="lockup"><span class="mark" aria-hidden="true"></span><span class="word" role="img" aria-label="Quiet Bands"></span></span><span>The idea</span></div>
+  <h2>Something happens.<br />Something fires.</h2>
+  <p>Every automation people flex — the n8n builds, the WhatsApp bots, the "AI agents" — is the same skeleton underneath: a <strong>trigger</strong> and an <strong>action</strong>, stacked.</p>
+  <p>So don't start with Python, a $2,000 course or 20 hours of tutorials. Start with one small workflow that runs on its own. This is it:</p>
+  <div class="flow">
+    <div class="node trigger"><div class="box">8</div><div class="label">Every day 8:00</div><div class="sub">Schedule</div></div>
+    <div class="wire"></div>
+    <div class="node"><div class="box">{ }</div><div class="label">Get forecast</div><div class="sub">HTTP request</div></div>
+    <div class="wire"></div>
+    <div class="node"><div class="box">↗</div><div class="label">Send message</div><div class="sub">Telegram</div></div>
+  </div>
+  <p>Every morning at 8, your phone gets today's high and the chance of rain. You never touch it again.</p>
+  <h3>You'll need</h3>
+  <ul>
+    <li><strong>Telegram</strong> on your phone.</li>
+    <li>An <strong>n8n</strong> account (n8n.io). Use Cloud so it keeps running when your laptop is shut. It's paid after the free trial, so check current pricing.</li>
+  </ul>
+  <div class="note"><div class="tag">The real test</div><p>Build it, publish it, then don't touch it for three days. The first time it fires while you're asleep, it clicks.</p></div>
+  <div class="folio"><span>Your first automation</span><span>02</span></div>
+</section>
+
+<!-- 3. step 1 -->
+<section class="page">
+  <div class="grid"></div>
+  <div class="runner"><span class="lockup"><span class="mark" aria-hidden="true"></span><span class="word" role="img" aria-label="Quiet Bands"></span></span><span>Step 1 of 6</span></div>
+  <div class="step-head"><span class="step-num">STEP 01</span><span class="time">3 min</span></div>
+  <h2>Make your bot.</h2>
+  <ol>
+    <li>In Telegram, search <strong>@BotFather</strong>. Pick the one with the blue check.</li>
+    <li>Send <code>/newbot</code>.</li>
+    <li>Give it a name, then a username ending in <code>bot</code> (e.g. <code>mymorning_bot</code>).</li>
+    <li>BotFather replies with your <strong>token</strong>. It looks like <code>7123456789:AAHk3x9…</code></li>
+  </ol>
+  <div class="note"><div class="tag">Lost it?</div><p>Message BotFather <code>/mybots</code> → your bot → <strong>API Token</strong>.</p></div>
+  <div class="note warn"><div class="tag">Keep it private</div><p>Anyone with the token controls your bot. Blur it in every screenshot. If it leaks, hit <strong>Revoke current token</strong> on that same screen.</p></div>
+  <figure class="cap"><img src="shots/01-botfather-token.jpg" alt="BotFather's reply with the bot token blacked out" /><figcaption>The real reply. Token blacked out — do the same.</figcaption></figure>
+  <div class="folio"><span>Your first automation</span><span>03</span></div>
+</section>
+
+<!-- 4. step 2 -->
+<section class="page">
+  <div class="grid"></div>
+  <div class="runner"><span class="lockup"><span class="mark" aria-hidden="true"></span><span class="word" role="img" aria-label="Quiet Bands"></span></span><span>Step 2 of 6</span></div>
+  <div class="step-head"><span class="step-num">STEP 02</span><span class="time">2 min</span></div>
+  <h2>Get your Chat ID.</h2>
+  <ol>
+    <li><strong class="live">Open your new bot — not BotFather — tap Start, and send it "hi".</strong> A bot can't message you until you've messaged it. Skip this and nothing works.</li>
+    <li>In your browser, open this (your token goes where it says, right after the word <code>bot</code>):
+      <pre>https://api.telegram.org/bot&lt;YOUR_TOKEN&gt;/getUpdates</pre></li>
+    <li>Find <code>"chat":{"id":</code> and copy the number after it.</li>
+  </ol>
+  <div class="note"><div class="tag">Two numbers. Don't swap them.</div>
+    <p><strong>Token</strong> has a colon — <code>7123456789:AAH…</code> — and goes in the <strong>credential</strong>.<br /><strong>Chat ID</strong> is just digits — <code>583920471</code> — and goes in the node's <strong>Chat ID</strong> field.</p></div>
+  <p class="mono" style="color:var(--dim)">Page shows "result":[] ? Message your bot again and refresh.</p>
+  <figure class="cap" style="margin-top:14px"><div class="mock"><span class="ex">EXAMPLE</span>
+    <div class="mock-url">api.telegram.org/bot&lt;YOUR_TOKEN&gt;/getUpdates</div>
+<div class="mock-json">{"ok":true,"result":[{"update_id":100000001,
+ "message":{"message_id":2,"from":{...},
+ "chat":{"id":<span class="hit">583920471</span>,"first_name":"You",
+ "type":"private"},"text":"hi"}}]}</div></div><figcaption>Example illustration, made-up ID, not a real screenshot.</figcaption></figure>
+  <div class="folio"><span>Your first automation</span><span>04</span></div>
+</section>
+
+<!-- 5. step 3 + 4 -->
+<section class="page">
+  <div class="grid"></div>
+  <div class="runner"><span class="lockup"><span class="mark" aria-hidden="true"></span><span class="word" role="img" aria-label="Quiet Bands"></span></span><span>Steps 3–4 of 6</span></div>
+  <div class="step-head"><span class="step-num">STEP 03 · THE TRIGGER</span><span class="time">2 min</span></div>
+  <h2>8 AM, every day.</h2>
+  <ol>
+    <li>In n8n, create a new workflow.</li>
+    <li>Add a <strong>Schedule Trigger</strong>: every <strong>Day</strong>, hour <strong>8</strong>, minute <strong>0</strong>.</li>
+    <li>Open the workflow's <strong>Settings</strong> and set <strong>Timezone</strong> to your city. Skip it and it fires at 8 on the server's clock.</li>
+  </ol>
+  <div class="step-head" style="margin-top:22px"><span class="step-num">STEP 04 · THE DATA</span><span class="time">3 min</span></div>
+  <h2>Get the forecast.</h2>
+  <ol>
+    <li>Add an <strong>HTTP Request</strong> node. Method: <strong>GET</strong>.</li>
+    <li>URL — this one's New York; swap in your city's latitude, longitude and timezone:
+      <pre>https://api.open-meteo.com/v1/forecast?latitude=40.71&amp;longitude=-74.01&amp;daily=temperature_2m_max,precipitation_probability_max&amp;temperature_unit=fahrenheit&amp;timezone=America%2FNew_York&amp;forecast_days=1</pre></li>
+    <li><strong>Test step.</strong> You should see <code>temperature_2m_max</code> and <code>precipitation_probability_max</code>.</li>
+  </ol>
+  <p class="mono" style="color:var(--dim)">Open-Meteo: free, no API key, for personal non-commercial use.</p>
+  <div class="folio"><span>Your first automation</span><span>05</span></div>
+</section>
+
+<!-- 6. step 5 -->
+<section class="page">
+  <div class="grid"></div>
+  <div class="runner"><span class="lockup"><span class="mark" aria-hidden="true"></span><span class="word" role="img" aria-label="Quiet Bands"></span></span><span>Step 5 of 6</span></div>
+  <div class="step-head"><span class="step-num">STEP 05 · THE ACTION</span><span class="time">5 min</span></div>
+  <h2>Send it to your phone.</h2>
+  <ol>
+    <li>Add a <strong>Telegram</strong> node → <strong>Send a text message</strong>.</li>
+    <li><strong>Credential to connect with → Create new.</strong> Paste your <strong>token</strong> into <strong>Access Token</strong>. Look for "Connection tested successfully."</li>
+    <li><strong>Chat ID:</strong> paste your Chat ID.</li>
+    <li><strong>Text:</strong> switch the field to <strong>Expression</strong> and paste:
+      <pre>Good morning.
+High {{ $json.daily.temperature_2m_max[0] }}°F · {{ $json.daily.precipitation_probability_max[0] }}% chance of rain</pre></li>
+    <li><strong>Add Field → Append n8n Attribution → off</strong>, to drop the "sent with n8n" footer.</li>
+    <li><strong>Test step.</strong> Your phone should buzz.</li>
+  </ol>
+  <figure class="cap"><div class="mock"><span class="ex">EXAMPLE</span><div class="mock-chat">
+    <span class="day">TODAY</span>
+    <div class="bubble">Good morning.<br />High 74°F · 60% chance of rain<small>8:00 AM</small></div>
+  </div></div><figcaption>Example illustration, not a real screenshot.</figcaption></figure>
+  <div class="folio"><span>Your first automation</span><span>06</span></div>
+</section>
+
+<!-- 7. step 6 -->
+<section class="page">
+  <div class="grid"></div>
+  <div class="runner"><span class="lockup"><span class="mark" aria-hidden="true"></span><span class="word" role="img" aria-label="Quiet Bands"></span></span><span>Step 6 of 6</span></div>
+  <div class="step-head"><span class="step-num">STEP 06</span><span class="time">10 sec</span></div>
+  <h2>Publish it.<br />Walk away.</h2>
+  <p>Click <strong class="live">Publish</strong>, top right. <strong>Save</strong> only keeps a draft — nothing runs on schedule until you publish. Edit it later? Publish again.</p>
+  <p>Then leave it alone for three mornings. If a message doesn't land, open the <strong>Executions</strong> tab: it shows whether it ran and where it stopped.</p>
+  <figure class="cap" style="margin-top:28px"><img src="shots/06-workflow-green.png" alt="The finished n8n workflow: Schedule Trigger, HTTP Request and Send a text message, all green" /><figcaption>Three nodes, all green. That's the whole build.</figcaption></figure>
+  <figure class="cap" style="margin-top:14px"><div class="mock"><span class="ex">EXAMPLE</span><div class="mock-runs">
+    <div class="run"><span class="ok">✓</span><b>Day 1 · 8:00:00</b><span>Succeeded</span></div>
+    <div class="run"><span class="ok">✓</span><b>Day 2 · 8:00:00</b><span>Succeeded</span></div>
+    <div class="run"><span class="ok">✓</span><b>Day 3 · 8:00:00</b><span>Succeeded</span></div>
+  </div></div><figcaption>Example illustration, what the Executions tab tells you.</figcaption></figure>
+  <div class="folio"><span>Your first automation</span><span>07</span></div>
+</section>
+
+<!-- 8. troubleshooting -->
+<section class="page">
+  <div class="grid"></div>
+  <div class="runner"><span class="lockup"><span class="mark" aria-hidden="true"></span><span class="word" role="img" aria-label="Quiet Bands"></span></span><span>If it breaks</span></div>
+  <h2>It's one of these.</h2>
+  <table>
+    <tr><th>Error</th><th>Fix</th></tr>
+    <tr><td>Chat not found</td><td>Send your bot "hi", then get the Chat ID again from <code>getUpdates</code>. It must be your chat with <em>your</em> bot, not BotFather.</td></tr>
+    <tr><td>Bad request — check your parameters</td><td>Open the error's <strong>Details</strong>. It's almost always "chat not found" (above) or an empty message (below).</td></tr>
+    <tr><td>Unauthorized</td><td>Wrong token, or a Chat ID pasted where the token goes. Re-copy it: <code>/mybots</code> → your bot → API Token.</td></tr>
+    <tr><td>Message is empty or says undefined</td><td>The expression can't find the data. Run the HTTP Request step first and check the field names match.</td></tr>
+    <tr><td>Nothing came at 8 AM</td><td>Did you hit <strong>Publish</strong>? Is the timezone set? Check <strong>Executions</strong>.</td></tr>
+  </table>
+  <div class="note" style="margin-top:18px"><div class="tag">Honest note</div><p>The first two rows are the exact walls I hit building this one. Everyone hits them. They're not you.</p></div>
+  <div class="folio"><span>Your first automation</span><span>08</span></div>
+</section>
+
+<!-- 9. next -->
+<section class="page end">
+  <div class="grid"></div>
+  <div class="runner"><span class="lockup"><span class="mark" aria-hidden="true"></span><span class="word" role="img" aria-label="Quiet Bands"></span></span><span>What's next</span></div>
+  <div class="kicker">Automation 02</div>
+  <h2>Stack the<br />next one.</h2>
+  <p>Put an <strong>IF</strong> node between the forecast and Telegram, and only let the message through when rain is over 50%.</p>
+  <p>Same skeleton, one more step. Now it isn't a daily report — it's an alert that only speaks when it matters.</p>
+  <div class="flow">
+    <div class="node trigger"><div class="box">8</div><div class="label">8:00</div></div>
+    <div class="wire"></div>
+    <div class="node"><div class="box">{ }</div><div class="label">Forecast</div></div>
+    <div class="wire"></div>
+    <div class="node"><div class="box" style="border-color:var(--orange);color:var(--orange)">?</div><div class="label live">Rain &gt; 50%</div></div>
+    <div class="wire"></div>
+    <div class="node"><div class="box">↗</div><div class="label">Alert</div></div>
+  </div>
+  <div style="margin-top:auto">
+    <p style="font-size:15px"><strong>Built yours?</strong> Post the screenshot and tag <strong>@flighty.builds</strong>. The next build drops on the feed.</p>
+  </div>
+  <div class="folio"><span>Your first automation</span><span>09</span></div>
+</section>
+
+</body>
+</html>
