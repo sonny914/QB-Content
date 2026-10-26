@@ -1,0 +1,13 @@
+{
+  "id": "video1-community",
+  "duration": 10.0,
+  "voice": "voice/video1-community.wav",
+  "lines": [
+    "Everybody's talking about AI.",
+    "Who's actually teaching you?",
+    "Come learn with us",
+    "at Quiet Bands."
+  ],
+  "cta": ["JOIN THE COMMUNITY", "QUIETBANDS.COM"],
+  "cta_start": 7.6
+}

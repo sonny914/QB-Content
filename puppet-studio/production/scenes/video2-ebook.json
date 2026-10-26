@@ -1,0 +1,15 @@
+{
+  "id": "video2-ebook",
+  "duration": 10.0,
+  "voice": "voice/video2-ebook.wav",
+  "lines": [
+    "You don't need",
+    "another AI lecture.",
+    "You need something",
+    "you can actually use.",
+    "Grab my free",
+    "AI starter guide."
+  ],
+  "cta": ["FREE AI STARTER GUIDE", "QUIETBANDS.COM"],
+  "cta_start": 8.0
+}
