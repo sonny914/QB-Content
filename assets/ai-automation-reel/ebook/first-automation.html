@@ -48,6 +48,8 @@
 
   .shot { margin-top: auto; border: 1.5px dashed rgba(242,238,229,.35); border-radius: 14px; min-height: 150px; display: grid; place-items: center; text-align: center; padding: 14px; color: var(--dim); font: 600 10px/1.5 "JetBrains Mono", monospace; letter-spacing: .06em; }
   .shot b { display: block; color: var(--cream); letter-spacing: .14em; margin-bottom: 4px; }
+  .cap { margin-top: auto; } .cap img { display: block; width: 100%; border-radius: 14px; border: 1px solid var(--hair); }
+  .cap figcaption { font: 600 9px/1.4 "JetBrains Mono", monospace; letter-spacing: .08em; color: var(--dim); margin-top: 6px; }
   .step-num { font: 700 11px/1 "JetBrains Mono", monospace; letter-spacing: .14em; color: var(--dim); }
   .time { font: 600 10px/1 "JetBrains Mono", monospace; color: var(--dim); border: 1px solid var(--hair); border-radius: 99px; padding: 4px 8px; }
   .step-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -132,7 +134,7 @@
   </ol>
   <div class="note"><div class="tag">Lost it?</div><p>Message BotFather <code>/mybots</code> → your bot → <strong>API Token</strong>.</p></div>
   <div class="note warn"><div class="tag">Keep it private</div><p>Anyone with the token controls your bot. Blur it in every screenshot. If it leaks, hit <strong>Revoke current token</strong> on that same screen.</p></div>
-  <div class="shot"><div><b>SCREENSHOT</b>BotFather reply with the token (blurred)</div></div>
+  <figure class="cap"><img src="shots/01-botfather-token.jpg" alt="BotFather's reply with the bot token blacked out" /><figcaption>The real reply. Token blacked out — do the same.</figcaption></figure>
   <div class="folio"><span>Your first automation</span><span>03</span></div>
 </section>
 
