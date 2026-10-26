@@ -50,6 +50,21 @@
   .shot b { display: block; color: var(--cream); letter-spacing: .14em; margin-bottom: 4px; }
   .cap { margin-top: auto; } .cap img { display: block; width: 100%; border-radius: 14px; border: 1px solid var(--hair); }
   .cap figcaption { font: 600 9px/1.4 "JetBrains Mono", monospace; letter-spacing: .08em; color: var(--dim); margin-top: 6px; }
+  /* MOCK illustrations: drawn, not captured. Each carries an EXAMPLE tag and a caption saying so. */
+  .mock { position: relative; border: 1px solid var(--hair); border-radius: 14px; background: #0d0d0d; padding: 14px; }
+  .mock .ex { position: absolute; top: 10px; right: 10px; font: 700 8.5px/1 "JetBrains Mono", monospace; letter-spacing: .14em; color: var(--black); background: var(--cream); border-radius: 99px; padding: 4px 7px; }
+  .mock-url { font: 600 9px/1 "JetBrains Mono", monospace; color: var(--dim); border: 1px solid var(--hair); border-radius: 99px; padding: 6px 10px; margin: 0 70px 10px 0; white-space: nowrap; overflow: hidden; }
+  .mock-json { font: 400 9.5px/1.6 "JetBrains Mono", monospace; color: var(--dim); white-space: pre; }
+  .mock-json .hit { color: var(--black); background: var(--orange); border-radius: 3px; padding: 0 3px; font-weight: 700; }
+  .mock-chat { display: flex; flex-direction: column; gap: 8px; padding-top: 18px; }
+  .mock-chat .day { align-self: center; font: 700 8.5px/1 "JetBrains Mono", monospace; letter-spacing: .12em; color: var(--dim); }
+  .bubble { align-self: flex-start; max-width: 78%; background: var(--cream); color: var(--black); border-radius: 14px 14px 14px 4px; padding: 9px 12px 7px; font-size: 12.5px; line-height: 1.4; }
+  .bubble small { display: block; text-align: right; font: 600 8.5px/1 "JetBrains Mono", monospace; opacity: .55; margin-top: 4px; }
+  .mock-runs { padding-top: 16px; }
+  .run { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--hair); font-size: 11.5px; }
+  .run:last-child { border-bottom: 0; }
+  .run .ok { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--cream); display: grid; place-items: center; font: 700 9px/1 "JetBrains Mono", monospace; }
+  .run b { font-weight: 800; } .run span:last-child { margin-left: auto; font: 600 9px/1 "JetBrains Mono", monospace; color: var(--dim); }
   .step-num { font: 700 11px/1 "JetBrains Mono", monospace; letter-spacing: .14em; color: var(--dim); }
   .time { font: 600 10px/1 "JetBrains Mono", monospace; color: var(--dim); border: 1px solid var(--hair); border-radius: 99px; padding: 4px 8px; }
   .step-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -153,7 +168,12 @@
   <div class="note"><div class="tag">Two numbers. Don't swap them.</div>
     <p><strong>Token</strong> has a colon — <code>7123456789:AAH…</code> — and goes in the <strong>credential</strong>.<br /><strong>Chat ID</strong> is just digits — <code>583920471</code> — and goes in the node's <strong>Chat ID</strong> field.</p></div>
   <p class="mono" style="color:var(--dim)">Page shows "result":[] ? Message your bot again and refresh.</p>
-  <div class="shot" style="min-height:120px"><div><b>SCREENSHOT</b>getUpdates page with the chat id highlighted</div></div>
+  <figure class="cap" style="margin-top:14px"><div class="mock"><span class="ex">EXAMPLE</span>
+    <div class="mock-url">api.telegram.org/bot&lt;YOUR_TOKEN&gt;/getUpdates</div>
+<div class="mock-json">{"ok":true,"result":[{"update_id":100000001,
+ "message":{"message_id":2,"from":{...},
+ "chat":{"id":<span class="hit">583920471</span>,"first_name":"You",
+ "type":"private"},"text":"hi"}}]}</div></div><figcaption>Example illustration, made-up ID, not a real screenshot.</figcaption></figure>
   <div class="folio"><span>Your first automation</span><span>04</span></div>
 </section>
 
@@ -196,7 +216,10 @@ High {{ $json.daily.temperature_2m_max[0] }}°F · {{ $json.daily.precipitation_
     <li><strong>Add Field → Append n8n Attribution → off</strong>, to drop the "sent with n8n" footer.</li>
     <li><strong>Test step.</strong> Your phone should buzz.</li>
   </ol>
-  <div class="shot" style="min-height:130px"><div><b>SCREENSHOT</b>the Telegram message on your phone</div></div>
+  <figure class="cap"><div class="mock"><span class="ex">EXAMPLE</span><div class="mock-chat">
+    <span class="day">TODAY</span>
+    <div class="bubble">Good morning.<br />High 74°F · 60% chance of rain<small>8:00 AM</small></div>
+  </div></div><figcaption>Example illustration, not a real screenshot.</figcaption></figure>
   <div class="folio"><span>Your first automation</span><span>06</span></div>
 </section>
 
@@ -209,7 +232,11 @@ High {{ $json.daily.temperature_2m_max[0] }}°F · {{ $json.daily.precipitation_
   <p>Click <strong class="live">Publish</strong>, top right. <strong>Save</strong> only keeps a draft — nothing runs on schedule until you publish. Edit it later? Publish again.</p>
   <p>Then leave it alone for three mornings. If a message doesn't land, open the <strong>Executions</strong> tab: it shows whether it ran and where it stopped.</p>
   <figure class="cap" style="margin-top:28px"><img src="shots/06-workflow-green.png" alt="The finished n8n workflow: Schedule Trigger, HTTP Request and Send a text message, all green" /><figcaption>Three nodes, all green. That's the whole build.</figcaption></figure>
-  <div class="shot" style="margin-top:12px; min-height:110px"><div><b>SCREENSHOT</b>Executions tab: three 8:00 runs, all succeeded</div></div>
+  <figure class="cap" style="margin-top:14px"><div class="mock"><span class="ex">EXAMPLE</span><div class="mock-runs">
+    <div class="run"><span class="ok">✓</span><b>Day 1 · 8:00:00</b><span>Succeeded</span></div>
+    <div class="run"><span class="ok">✓</span><b>Day 2 · 8:00:00</b><span>Succeeded</span></div>
+    <div class="run"><span class="ok">✓</span><b>Day 3 · 8:00:00</b><span>Succeeded</span></div>
+  </div></div><figcaption>Example illustration, what the Executions tab tells you.</figcaption></figure>
   <div class="folio"><span>Your first automation</span><span>07</span></div>
 </section>
 
